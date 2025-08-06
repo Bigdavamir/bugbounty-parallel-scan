@@ -37,16 +37,14 @@ jobs:
         with:
           path: x8-results/
           key: x8-results-*-${{ inputs.run_id }}
-          restore-keys: |
-            x8-results-
+          restore-keys: x8-results-
 
       - name: Restore kxss results
         uses: actions/cache@v3
         with:
           path: kxss-results/
           key: kxss-results-*-${{ inputs.run_id }}
-          restore-keys: |
-            kxss-results-
+          restore-keys: kxss-results-
 
       - name: Aggregate results and generate summary
         run: |
@@ -121,15 +119,4 @@ jobs:
           fi
 
           # Copy input files to final results
-          cp combined-results/all-urls.txt final-results/ 2>/dev/null || touch final-results/all-urls.txt
-          cp combined-results/dynamic-urls.txt final-results/ 2>/dev/null || touch final-results/dynamic-urls.txt
-          cp combined-results/static-urls.txt final-results/ 2>/dev/null || touch final-results/static-urls.txt
-          cp combined-results/unfurl-params.txt final-results/ 2>/dev/null || touch final-results/unfurl-params.txt
-
-          echo "Summary generation completed."
-
-      - name: Upload final results
-        uses: actions/upload-artifact@v3
-        with:
-          name: bug-hunt-results-${{ inputs.domain }}
-          path: final-results/
+          cp combined-results/all-urls.txt final-results/ 2>/dev/null ||
