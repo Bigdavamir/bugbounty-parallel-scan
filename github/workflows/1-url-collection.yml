@@ -1,4 +1,4 @@
-name: 1-URL Collection
+name: 1 URL Collection
 
 on:
   workflow_dispatch:
@@ -99,12 +99,13 @@ jobs:
           name: gau-results
           path: gau-results/
 
-  combine-results:
+  combine-and-httpx:
     needs: [passive-wayback, passive-gau]
     runs-on: ubuntu-latest
     outputs:
       dynamic-urls-count: ${{ steps.count.outputs.dynamic }}
       total-urls-count: ${{ steps.count.outputs.total }}
+      alive-urls-count: ${{ steps.count.outputs.alive }}
     steps:
       - name: Download wayback results
         uses: actions/download-artifact@v4
@@ -125,6 +126,7 @@ jobs:
           export PATH="$HOME/go/bin:$PATH"
           go install github.com/tomnomnom/anew@latest
           go install github.com/tomnomnom/unfurl@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Combine and filter results
@@ -147,19 +149,19 @@ jobs:
           https://${{ inputs.domain }}/contact?subject=hello&name=test
           EOF
           
-          sort -u all-urls.tmp | grep -iEv "\.${EXTS}" | awk 'NF' > combined-results/all-urls.txt
+          sort -u all-urls.tmp | grep -iEv "\.${EXTS}" | awk 'NF' > combined-results/all-clean-urls.txt
           
           if command -v unfurl >/dev/null 2>&1; then
-            unfurl --unique keys < combined-results/all-urls.txt | sort -u > combined-results/unfurl-params.txt
+            unfurl --unique keys < combined-results/all-clean-urls.txt | sort -u > combined-results/params.txt
           else
-            grep '?' combined-results/all-urls.txt | while IFS= read -r url; do
+            grep '?' combined-results/all-clean-urls.txt | while IFS= read -r url; do
               query="${url#*\?}"
               echo "$query" | sed 's/&/\n/g' | sed 's/=.*//' | grep -v '^$'
-            done | sort -u > combined-results/unfurl-params.txt
+            done | sort -u > combined-results/params.txt
           fi
           
-          if [ $(wc -l < combined-results/unfurl-params.txt) -lt 5 ]; then
-            cat >> combined-results/unfurl-params.txt << 'EOF'
+          if [ $(wc -l < combined-results/params.txt) -lt 5 ]; then
+            cat >> combined-results/params.txt << 'EOF'
           id
           q
           search
@@ -182,24 +184,51 @@ jobs:
           debug
           test
           EOF
-            sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
+            sort -u combined-results/params.txt -o combined-results/params.txt
           fi
           
-          grep -v '?' combined-results/all-urls.txt > combined-results/static-urls.txt || true
-          grep '?' combined-results/all-urls.txt > combined-results/dynamic-urls.txt || true
+          grep -v '?' combined-results/all-clean-urls.txt > combined-results/static-urls.txt || true
+          grep '?' combined-results/all-clean-urls.txt > combined-results/dynamic-urls.txt || true
           rm -f all-urls.tmp
 
-      - name: Count URLs for matrix
+      - name: Run httpx on all URLs
+        run: |
+          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
+          
+          if [ -s "combined-results/all-clean-urls.txt" ]; then
+            echo "Running httpx on $(wc -l < combined-results/all-clean-urls.txt) URLs..."
+            
+            split -l 150 combined-results/all-clean-urls.txt chunk_
+            ls chunk_* | xargs -P 8 -I{} bash -c \
+              'httpx -silent -threads 100 -timeout 5 -retries 2 < "{}" > "{}.httpx"' || true
+            
+            cat chunk_*.httpx > combined-results/all-alive-urls.txt 2>/dev/null || touch combined-results/all-alive-urls.txt
+            rm -f chunk_* chunk_*.httpx
+            
+            ALIVE_COUNT=$(wc -l < combined-results/all-alive-urls.txt)
+            echo "httpx found $ALIVE_COUNT live URLs"
+          else
+            touch combined-results/all-alive-urls.txt
+          fi
+
+      - name: Save domain and headers info
+        run: |
+          echo "${{ inputs.domain }}" > combined-results/domain.txt
+          echo "${{ inputs.headers }}" > combined-results/headers.txt
+
+      - name: Count URLs for outputs
         id: count
         run: |
           DYNAMIC=$(wc -l < combined-results/dynamic-urls.txt)
-          TOTAL=$(wc -l < combined-results/all-urls.txt)
+          TOTAL=$(wc -l < combined-results/all-clean-urls.txt)
+          ALIVE=$(wc -l < combined-results/all-alive-urls.txt)
           echo "dynamic=$DYNAMIC" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          echo "Found $DYNAMIC dynamic URLs, $TOTAL total URLs"
+          echo "alive=$ALIVE" >> $GITHUB_OUTPUT
+          echo "Found $DYNAMIC dynamic URLs, $TOTAL total URLs, $ALIVE alive URLs"
 
-      - name: Upload combined results
+      - name: Upload URL collection results
         uses: actions/upload-artifact@v4
         with:
-          name: combined-results
+          name: url-collection-results
           path: combined-results/
