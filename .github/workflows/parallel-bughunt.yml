@@ -4,109 +4,78 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Target domain (for example: example.com)'
+        description: "Target domain (e.g., example.com)"
         required: true
 
 jobs:
-  run-once:
+  bughunt:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set script permissions
-        run: chmod +x main.sh
+      - name: Install dependencies (jq, moreutils)
+        run: |
+          sudo apt update
+          sudo apt install -y jq moreutils
 
-      - name: Install all bugbounty tools
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install bugbounty tools
         run: |
           set -e
 
-          # waybackurls (tomnomnom)
-          curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest \
-            | grep "browser_download_url.*linux-amd64" \
-            | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O waybackurls.tgz {}
-          tar -xzf waybackurls.tgz
-          mv waybackurls /usr/local/bin/
-          chmod +x /usr/local/bin/waybackurls
+          # waybackurls
+          go install github.com/tomnomnom/waybackurls@latest
+          cp ~/go/bin/waybackurls /usr/local/bin/
 
           # anew
-          curl -s https://api.github.com/repos/tomnomnom/anew/releases/latest \
-            | grep "browser_download_url.*linux-amd64" \
-            | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O anew.tgz {}
-          tar -xzf anew.tgz
-          mv anew /usr/local/bin/
-          chmod +x /usr/local/bin/anew
+          go install github.com/tomnomnom/anew@latest
+          cp ~/go/bin/anew /usr/local/bin/
 
           # unfurl
-          curl -s https://api.github.com/repos/tomnomnom/unfurl/releases/latest \
-            | grep "browser_download_url.*linux-amd64" \
-            | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O unfurl.tgz {}
-          tar -xzf unfurl.tgz
-          mv unfurl /usr/local/bin/
-          chmod +x /usr/local/bin/unfurl
+          go install github.com/tomnomnom/unfurl@latest
+          cp ~/go/bin/unfurl /usr/local/bin/
 
-          # gau
-          curl -s https://api.github.com/repos/lc/gau/releases/latest \
-            | grep "browser_download_url.*gau-linux-amd64" \
-            | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O /usr/local/bin/gau {}
-          chmod +x /usr/local/bin/gau
-
-          # httpx
-          curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest \
+          # gau (binary release)
+          echo "==> Resolving gau download URL…"
+          GAU_URL=$(curl -s https://api.github.com/repos/lc/gau/releases/latest \
             | grep "browser_download_url.*linux_amd64" \
             | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O /usr/local/bin/httpx {}
-          chmod +x /usr/local/bin/httpx
+            | head -n1)
+          echo "Downloading gau from: $GAU_URL"
+          wget -q -O gau "$GAU_URL"
+          chmod +x gau
+          sudo mv gau /usr/local/bin/gau
+
+          # httpx
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          cp ~/go/bin/httpx /usr/local/bin/
 
           # kxss
-          curl -s https://api.github.com/repos/Emoe/kxss/releases/latest \
-            | grep "browser_download_url.*linux-amd64" \
-            | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O /usr/local/bin/kxss {}
-          chmod +x /usr/local/bin/kxss
+          go install github.com/tomnomnom/kxss@latest
+          cp ~/go/bin/kxss /usr/local/bin/
 
           # x8
-          curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest \
-            | grep "browser_download_url.*x86_64-linux-x8" \
-            | grep -o 'https://[^"]*' \
-            | head -n1 \
-            | xargs -I{} wget -O x8.tar.gz {}
-          tar -xzf x8.tar.gz
-          mv x8 /usr/local/bin/
-          chmod +x /usr/local/bin/x8
+          go install github.com/Sh1Yo/x8/cmd/x8@latest
+          cp ~/go/bin/x8 /usr/local/bin/
 
-          # jq, moreutils for helpers
-          sudo apt update && sudo apt install -y jq moreutils
+          # Fix PATH in environment (useful for custom steps)
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
-          # check versions
-          for tool in waybackurls anew unfurl gau httpx kxss x8 jq; do
-            echo "Checking $tool version:"
-            $tool --help | head -n 2
-          done
+      - name: Make main.sh executable
+        run: chmod +x main.sh
 
-      - name: Check installed tools (diagnose)
-        run: |
-          for tool in waybackurls gau httpx x8 kxss unfurl anew jq; do
-            which $tool || (echo "$tool NOT FOUND!" && exit 1)
-          done
-          echo "All tools installed."
+      - name: Run main.sh
+        run: ./main.sh ${{ github.event.inputs.domain }}
 
-      - name: Run bug bounty main.sh
-        run: ./main.sh "${{ github.event.inputs.domain }}"
-
-      - name: Upload result (Recon Output)
+      - name: Archive recon results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recon-output
-          path: ${{ github.event.inputs.domain }}_recon/
+          name: recon-results
+          path: ./*_recon/
