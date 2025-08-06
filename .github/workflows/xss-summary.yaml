@@ -5,6 +5,10 @@ on:
     workflows: ["Parallel Bug Hunt - Part1"] # نام workflow اول
     types: [completed]
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   # Dummy job to satisfy GitHub Actions requirement for a starting point
   start:
@@ -31,6 +35,7 @@ jobs:
           workflow_conclusion: success
           name: combined-results
           path: combined-results/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install httpx with PATH fix
         run: |
@@ -106,6 +111,7 @@ jobs:
           workflow_conclusion: success
           name: combined-results
           path: combined-results/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all httpx results
         run: |
