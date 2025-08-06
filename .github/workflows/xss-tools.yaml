@@ -128,20 +128,20 @@ jobs:
       - name: Combine httpx results and run x8 (with debug)
         run: |
           mkdir -p x8-results-${{ matrix.chunk }}
-          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
-          echo "---- [x8 debug] dynamic-alive.txt ----"
-          wc -l dynamic-alive.txt || true
-          head -10 dynamic-alive.txt || true
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-httpx.txt || true
+          echo "---- [x8 debug] all-httpx.txt ----"
+          wc -l all-httpx.txt || true
+          head -10 all-httpx.txt || true
           echo "---- [x8 debug] combined-results/unfurl-params.txt ----"
           wc -l combined-results/unfurl-params.txt || true
           head -10 combined-results/unfurl-params.txt || true
 
-          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
-            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
+          if [[ -s "all-httpx.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            TOTAL_LINES=$(wc -l < all-httpx.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 5 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
+            sed -n "${START_LINE},${END_LINE}p" all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
 
             echo "---- [x8 debug] x8-chunk-${{ matrix.chunk }}.txt ----"
             wc -l x8-chunk-${{ matrix.chunk }}.txt || true
@@ -204,20 +204,20 @@ jobs:
         run: |
           mkdir -p kxss-results-${{ matrix.chunk }}
           export PATH=$PATH:$(go env GOPATH)/bin
-          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
-          echo "---- [kxss debug] dynamic-alive.txt ----"
-          wc -l dynamic-alive.txt || true
-          head -10 dynamic-alive.txt || true
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-httpx.txt || true
+          echo "---- [kxss debug] all-httpx.txt ----"
+          wc -l all-httpx.txt || true
+          head -10 all-httpx.txt || true
           echo "---- [kxss debug] combined-results/unfurl-params.txt ----"
           wc -l combined-results/unfurl-params.txt || true
           head -10 combined-results/unfurl-params.txt || true
 
-          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
-            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
+          if [[ -s "all-httpx.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            TOTAL_LINES=$(wc -l < all-httpx.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 6 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > kxss-urls-${{ matrix.chunk }}.txt
+            sed -n "${START_LINE},${END_LINE}p" all-httpx.txt > kxss-urls-${{ matrix.chunk }}.txt
 
             echo "---- [kxss debug] kxss-urls-${{ matrix.chunk }}.txt ----"
             wc -l kxss-urls-${{ matrix.chunk }}.txt || true
