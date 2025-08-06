@@ -1,0 +1,223 @@
+name: Parallel Bug Hunt - Fixed
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain (e.g., example.com)'
+        required: true
+        type: string
+      headers:
+        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  # Job 1: Passive enumeration with waybackurls
+  passive-wayback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install basic tools
+        run: |
+          sudo apt update
+          sudo apt install -y curl wget jq
+
+      - name: Install waybackurls
+        run: |
+          # Method 1: Try direct binary download
+          echo "Trying direct binary download..."
+          ARCH="linux-amd64"
+
+          # Get latest release info
+          LATEST=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest)
+          VERSION=$(echo "$LATEST" | jq -r '.tag_name')
+
+          echo "Found version: $VERSION"
+
+          # Try different download patterns
+          URLS=(
+            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls-${ARCH}-${VERSION}.tgz"
+            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls_${ARCH}"
+            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls_linux_amd64"
+          )
+
+          INSTALLED=false
+          for url in "${URLS[@]}"; do
+            echo "Trying: $url"
+            if wget -q "$url" -O waybackurls_download 2>/dev/null; then
+              echo "Downloaded successfully from: $url"
+
+              # Check if it's a tar file
+              if file waybackurls_download | grep -q "gzip"; then
+                echo "Extracting tar.gz file..."
+                tar -xzf waybackurls_download
+                find . -name "waybackurls" -type f -executable | head -1 | xargs -I{} cp {} waybackurls_binary
+              else
+                echo "Using direct binary..."
+                cp waybackurls_download waybackurls_binary
+              fi
+
+              chmod +x waybackurls_binary
+              sudo mv waybackurls_binary /usr/local/bin/waybackurls
+
+              # Test installation
+              if waybackurls --help >/dev/null 2>&1 || waybackurls -h >/dev/null 2>&1; then
+                echo "waybackurls installed successfully"
+                INSTALLED=true
+                break
+              fi
+            fi
+          done
+
+          # Fallback: Install Go and build from source
+          if [ "$INSTALLED" = false ]; then
+            echo "Binary installation failed, trying Go installation..."
+            sudo apt install -y golang-go
+            export PATH=$PATH:/usr/local/go/bin:~/go/bin
+            go install github.com/tomnomnom/waybackurls@latest
+            sudo cp ~/go/bin/waybackurls /usr/local/bin/ 2>/dev/null || echo "waybackurls available in ~/go/bin/"
+            export PATH="$HOME/go/bin:$PATH"
+          fi
+
+      - name: Run waybackurls
+        run: |
+          DOMAIN="${{ inputs.domain }}"
+          mkdir -p waybackurls-results
+
+          echo "Testing waybackurls installation..."
+          which waybackurls || echo "waybackurls not in PATH"
+
+          # Add go bin to PATH if needed
+          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
+
+          echo "Running waybackurls for: $DOMAIN"
+
+          # Try different approaches
+          if command -v waybackurls >/dev/null 2>&1; then
+            echo "$DOMAIN" | waybackurls > waybackurls-results/waybackurls.txt 2>&1 || {
+              echo "waybackurls failed, creating empty file"
+              touch waybackurls-results/waybackurls.txt
+            }
+          else
+            echo "waybackurls not found, creating empty file"
+            touch waybackurls-results/waybackurls.txt
+          fi
+
+          WAYBACK_COUNT=$(wc -l < waybackurls-results/waybackurls.txt)
+          echo "Waybackurls found $WAYBACK_COUNT URLs"
+
+          # Add some manual URLs as fallback
+          echo "https://${DOMAIN}/" >> waybackurls-results/waybackurls.txt
+          echo "https://www.${DOMAIN}/" >> waybackurls-results/waybackurls.txt
+          echo "https://${DOMAIN}/admin" >> waybackurls-results/waybackurls.txt
+          echo "https://${DOMAIN}/login" >> waybackurls-results/waybackurls.txt
+          echo "https://${DOMAIN}/api" >> waybackurls-results/waybackurls.txt
+
+      - name: Upload waybackurls results
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayback-results
+          path: waybackurls-results/
+
+  # Job 2: Passive enumeration with gau
+  passive-gau:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Go and gau
+        run: |
+          # Install Go
+          sudo apt update
+          sudo apt install -y golang-go curl
+
+          # Set up Go environment
+          export GOPATH=$HOME/go
+          export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
+          echo "export PATH=\$PATH:/usr/local/go/bin:\$HOME/go/bin" >> ~/.bashrc
+
+          # Install gau
+          echo "Installing gau..."
+          go install github.com/lc/gau/v2/cmd/gau@latest
+
+          # Copy to system bin
+          sudo cp $HOME/go/bin/gau /usr/local/bin/ 2>/dev/null || echo "gau available in ~/go/bin/"
+
+          # Add to PATH for this session
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Run gau
+        run: |
+          DOMAIN="${{ inputs.domain }}"
+          mkdir -p gau-results
+
+          # Set PATH
+          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
+
+          echo "Testing gau installation..."
+          which gau || echo "gau not in standard PATH"
+
+          echo "Running gau for: $DOMAIN"
+
+          if command -v gau >/dev/null 2>&1; then
+            timeout 300 gau "$DOMAIN" --threads 3 --subs > gau-results/gau.txt 2>&1 || {
+              echo "gau failed or timed out, checking partial results..."
+              touch gau-results/gau.txt
+            }
+          else
+            echo "gau not found, creating empty file"
+            touch gau-results/gau.txt
+          fi
+
+          GAU_COUNT=$(wc -l < gau-results/gau.txt)
+          echo "GAU found $GAU_COUNT URLs"
+
+          # Add some manual URLs as fallback
+          echo "https://${DOMAIN}/search?q=test" >> gau-results/gau.txt
+          echo "https://${DOMAIN}/page?id=1" >> gau-results/gau.txt
+          echo "https://api.${DOMAIN}/v1/users?limit=10" >> gau-results/gau.txt
+
+      - name: Upload gau results
+        uses: actions/upload-artifact@v4
+        with:
+          name: gau-results
+          path: gau-results/
+
+  # Job 3: Combine results and prepare for httpx
+  combine-results:
+    needs: [passive-wayback, passive-gau]
+    runs-on: ubuntu-latest
+    outputs:
+      dynamic-urls-count: ${{ steps.count.outputs.dynamic }}
+      total-urls-count: ${{ steps.count.outputs.total }}
+    steps:
+      - name: Download wayback results
+        uses: actions/download-artifact@v4
+        with:
+          name: wayback-results
+          path: passive-wayback/
+
+      - name: Download gau results
+        uses: actions/download-artifact@v4
+        with:
+          name: gau-results
+          path: passive-gau/
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y jq moreutils golang-go curl
+
+          # Install Go tools
+          export PATH="$HOME/go/bin:$PATH"
+          go install github.com/tomnomnom/anew@latest
+          go install github.com/tomnomnom/unfurl@latest
+
+          # Copy to system bin
+          sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || echo "Tools available in ~/go/bin/"
+          echo "$HOME/go/bin" >> $GITHUB_PATH
