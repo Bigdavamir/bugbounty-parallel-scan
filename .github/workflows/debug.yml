@@ -1,0 +1,119 @@
+name: Debug httpx Issue
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug-httpx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install httpx
+        run: |
+          echo "Installing httpx..."
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "httpx installed at: $(which httpx)"
+      
+      - name: Test httpx basic functionality
+        run: |
+          echo "=== httpx Version ==="
+          httpx -version
+          
+          echo -e "
+=== Test 1: Simple working URL ==="
+          echo "http://httpbin.org/get" | httpx -verbose -timeout 15
+          
+          echo -e "
+=== Test 2: Your target domain ==="
+          echo "http://linkdin.com/" | httpx -verbose -timeout 15
+          
+          echo -e "
+=== Test 3: Multiple test URLs ==="
+          cat << 'EOF' | httpx -verbose -timeout 10
+          http://httpbin.org/get
+          http://linkdin.com/
+          https://www.google.com/
+          http://example.com/
+          EOF
+      
+      - name: Test httpx with different flags
+        run: |
+          echo "=== Testing different httpx configurations ==="
+          
+          echo -e "
+1. Basic silent mode:"
+          echo "http://linkdin.com/" | httpx -silent
+          
+          echo -e "
+2. With status codes:"
+          echo "http://linkdin.com/" | httpx -silent -status-code
+          
+          echo -e "
+3. With follow redirects:"
+          echo "http://linkdin.com/" | httpx -silent -status-code -follow-redirects
+          
+          echo -e "
+4. With tech detection:"
+          echo "http://linkdin.com/" | httpx -silent -status-code -tech-detect
+          
+          echo -e "
+5. Minimal settings:"
+          echo "http://linkdin.com/" | httpx -silent -threads 1 -rate-limit 1 -timeout 30
+      
+      - name: Compare with curl
+        run: |
+          echo "=== Comparing httpx vs curl ==="
+          
+          echo -e "
+--- curl result for linkdin.com ---"
+          curl -I -L -m 15 "http://linkdin.com/" 2>&1 || echo "curl failed"
+          
+          echo -e "
+--- httpx result for linkdin.com ---"  
+          echo "http://linkdin.com/" | httpx -verbose -follow-redirects -timeout 15 2>&1 || echo "httpx failed"
+          
+          echo -e "
+--- Testing with HTTPS ---"
+          curl -I -L -m 15 "https://linkdin.com/" 2>&1 || echo "HTTPS curl failed"
+          echo "https://linkdin.com/" | httpx -verbose -timeout 15 2>&1 || echo "HTTPS httpx failed"
+      
+      - name: Test with sample of your URLs
+        run: |
+          echo "=== Testing with your actual URLs ==="
+          
+          # Create a small sample of URLs for testing
+          cat << 'EOF' > test-urls.txt
+          http://linkdin.com/
+          http://linkdin.com/favicon.ico
+          http://blog.linkdin.com:80/
+          https://www.linkdin.com/login
+          http://linkdin.com:80/answers
+          EOF
+          
+          echo "URLs to test:"
+          cat test-urls.txt
+          
+          echo -e "
+--- httpx results ---"
+          cat test-urls.txt | httpx -verbose -timeout 20 -retries 2
+          
+          echo -e "
+--- httpx silent results ---"
+          cat test-urls.txt | httpx -silent -status-code -timeout 20
+      
+      - name: Environment and dependencies check
+        run: |
+          echo "=== Environment Check ==="
+          echo "Go version: $(go version)"
+          echo "httpx path: $(which httpx)"
+          echo "httpx permissions: $(ls -la $(which httpx))"
+          
+          echo -e "
+=== Network check ==="
+          ping -c 3 8.8.8.8
+          nslookup linkdin.com
+          
+          echo -e "
+=== DNS and routing ==="
+          dig linkdin.com
