@@ -1,135 +1,18 @@
-name: 1-URL Collection
+name: URL Collection
 
 on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Target domain (e.g., example.com)'
+        description: 'Target domain'
         required: true
         type: string
 
 jobs:
-  # Job 1: Passive enumeration with waybackurls
-  passive-wayback:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install waybackurls
+      - name: Simple test
         run: |
-          go install github.com/tomnomnom/waybackurls@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: Run waybackurls
-        run: |
-          DOMAIN="${{ inputs.domain }}"
-          mkdir -p waybackurls-results
-          
-          export PATH="$HOME/go/bin:$PATH"
-          echo "$DOMAIN" | waybackurls > waybackurls-results/waybackurls.txt || touch waybackurls-results/waybackurls.txt
-          
-          # Add fallback URLs
-          echo "https://${DOMAIN}/" >> waybackurls-results/waybackurls.txt
-          echo "https://www.${DOMAIN}/" >> waybackurls-results/waybackurls.txt
-          echo "https://${DOMAIN}/admin" >> waybackurls-results/waybackurls.txt
-          echo "https://${DOMAIN}/login" >> waybackurls-results/waybackurls.txt
-          
-          echo "Found $(wc -l < waybackurls-results/waybackurls.txt) URLs"
-
-      - name: Upload waybackurls results
-        uses: actions/upload-artifact@v4
-        with:
-          name: wayback-results
-          path: waybackurls-results/
-
-  # Job 2: GAU enumeration
-  passive-gau:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install GAU
-        run: |
-          go install github.com/lc/gau/v2/cmd/gau@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: Run GAU
-        run: |
-          DOMAIN="${{ inputs.domain }}"
-          mkdir -p gau-results
-          
-          export PATH="$HOME/go/bin:$PATH"
-          timeout 300 gau "$DOMAIN" --threads 5 --subs > gau-results/gau.txt || touch gau-results/gau.txt
-          
-          # Add test URLs
-          echo "https://${DOMAIN}/search?q=test" >> gau-results/gau.txt
-          echo "https://${DOMAIN}/page?id=1" >> gau-results/gau.txt
-          
-          echo "Found $(wc -l < gau-results/gau.txt) URLs"
-
-      - name: Upload GAU results
-        uses: actions/upload-artifact@v4
-        with:
-          name: gau-results
-          path: gau-results/
-
-  # Job 3: Combine and clean URLs
-  combine-results:
-    needs: [passive-wayback, passive-gau]
-    runs-on: ubuntu-latest
-    outputs:
-      total-urls: ${{ steps.count.outputs.total }}
-      dynamic-urls: ${{ steps.count.outputs.dynamic }}
-    steps:
-      - name: Download results
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - name: Combine and filter URLs
-        run: |
-          mkdir -p final-results
-          
-          # Combine all URLs
-          cat waybackurls-results/waybackurls.txt gau-results/gau.txt > all-raw-urls.txt
-          
-          # Filter out unwanted extensions
-          grep -viE '\.(css|js|jpg|jpeg|png|svg|gif|pdf|zip|exe)($|\?)' all-raw-urls.txt | sort -u > all-clean-urls.txt
-          
-          # Separate static and dynamic URLs
-          grep -v '?' all-clean-urls.txt > static-urls.txt || touch static-urls.txt
-          grep '?' all-clean-urls.txt > dynamic-urls.txt || touch dynamic-urls.txt
-          
-          # Extract parameters
-          grep '?' all-clean-urls.txt | sed 's/.*?//' | sed 's/&/
-/g' | sed 's/=.*//' | sort -u > params.txt
-          
-          # Add common parameters
-          cat >> params.txt << 'EOF'
-          id
-          q
-          search
-          page
-          user
-          redirect
-          callback
-          url
-          EOF
-          sort -u params.txt -o params.txt
-          
-          # Move to final results
-          cp all-raw-urls.txt all-clean-urls.txt static-urls.txt dynamic-urls.txt params.txt final-results/
-
-      - name: Count URLs
-        id: count
-        run: |
-          TOTAL=$(wc -l < all-clean-urls.txt)
-          DYNAMIC=$(wc -l < dynamic-urls.txt)
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          echo "dynamic=$DYNAMIC" >> $GITHUB_OUTPUT
-          echo "Total URLs: $TOTAL, Dynamic URLs: $DYNAMIC"
-
-      - name: Upload final results
-        uses: actions/upload-artifact@v4
-        with:
-          name: url-collection-results
-          path: final-results/
+          echo "Testing domain: ${{ inputs.domain }}"
+          echo "This is working!"
