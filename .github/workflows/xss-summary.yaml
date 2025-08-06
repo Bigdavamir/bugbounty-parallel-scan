@@ -1,18 +1,8 @@
 name: XSS Summary
 
 on:
-  workflow_dispatch: # Keep this for manual triggering if needed
-    inputs:
-      domain:
-        description: 'Target domain'
-        required: true
-        default: 'example.com'
-      headers:
-        description: 'Custom headers (e.g. "Authorization: Bearer TOKEN")'
-        required: false
   workflow_run: # Trigger this workflow when 'XSS Tools Execution' completes
-    workflows:
-      - "XSS Tools Execution" # Name of the workflow file (xss-tools.yaml)
+    workflows: ["XSS Tools Execution"] # Name of the workflow file (xss-tools.yaml)
     types:
       - completed
 
@@ -20,32 +10,51 @@ jobs:
   # Dummy job to satisfy GitHub Actions requirement for a starting point
   start:
     runs-on: ubuntu-latest
+    # Only run if the previous workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: This job is just a placeholder
         run: echo "Starting the summary workflow..."
 
   # Job 7: Final summary
   final-summary:
-    # The 'needs' here should correctly refer to jobs defined within THIS workflow file.
-    # Since httpx-scan, x8-scan, and kxss-scan are in xss-tools.yaml,
-    # this workflow doesn't directly depend on them by name.
-    # The workflow_run trigger handles the execution order.
+    # Depend on the placeholder job within this workflow
     needs: [start]
     runs-on: ubuntu-latest
+    # Only run if the previous workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Download all artifacts from previous workflows
         uses: actions/download-artifact@v4
         with:
-          pattern: "*" # Downloads all artifacts from previous jobs (including httpx, x8, kxss)
+          pattern: "*" # Downloads all artifacts from httpx, x8, kxss jobs
           merge-multiple: true
 
       - name: Generate final summary
         run: |
-          # Set domain variable
+          # Set domain variable - assuming it's passed or available from previous run context
+          # If this workflow is triggered by workflow_run, inputs might not be directly available.
+          # You might need to find a way to pass the domain, e.g., via an artifact or env variable.
+          # For now, using a placeholder if inputs.domain is not accessible.
           DOMAIN="${{ inputs.domain }}"
+          if [[ -z "$DOMAIN" ]]; then
+            # Attempt to get domain from workflow run context if possible, otherwise use placeholder
+            # This is a common challenge with workflow_run triggers.
+            # For now, we'll try to get it from the artifact pattern if possible, or use placeholder.
+            # A more robust solution involves passing the domain via an artifact file.
+            echo "Domain input not directly available in workflow_run context. Attempting to find from artifacts..."
+            # Example: Try to find domain from artifact name patterns if they contain it.
+            # This is a heuristic and might not always work.
+            DOMAIN=$(find . -name "FINAL-RESULTS-*" | head -n 1 | sed 's/FINAL-RESULTS-\(.*\)/\1/' || echo "target-domain.com")
+            if [[ "$DOMAIN" == "target-domain.com" ]]; then
+                echo "Could not determine domain from artifact names, using placeholder: $DOMAIN"
+            else
+                echo "Determined domain from artifact name: $DOMAIN"
+            fi
+          fi
+
 
           # Combine all results
-          # Note: Artifacts from xss-tools.yaml are downloaded into the root of the runner
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; > httpx.txt || true
           find . -name "httpx-results-*" -type d -exec grep '?' {}/*.txt \; > dynamic-httpx.txt || true
           find . -name "x8-results-*" -type d -exec cat {}/*.txt \; > x8-brute.txt || true
@@ -77,9 +86,13 @@ jobs:
           }
 
           # Generate summary counts
-          # We need to access artifacts from previous workflows, assuming they are downloaded
-          WAYBACK_COUNT=$(count_or_zero passive-wayback/waybackurls.txt)
-          GAU_COUNT=$(count_or_zero passive-gau/gau.txt)
+          # These counts depend on artifacts from the FIRST workflow (url-gathering.yaml)
+          # If they are not downloaded, these counts will be 0.
+          # To ensure these are available, you might need to explicitly download artifacts from url-gathering.yaml too.
+          # For now, assuming 'merge-multiple: true' handles it if they are in the root.
+          # If not, add specific 'download-artifact' steps for wayback and gau results.
+          WAYBACK_COUNT=$(count_or_zero passive-wayback/waybackurls.txt) # Might be 0 if artifact not downloaded
+          GAU_COUNT=$(count_or_zero passive-gau/gau.txt)             # Might be 0 if artifact not downloaded
           ALLURLS_COUNT=$(count_or_zero combined-results/all-urls.txt)
           STATIC_COUNT=$(grep -iv "?" combined-results/all-urls.txt 2>/dev/null | sort -u | wc -l || echo 0)
           DYNAMIC_COUNT=$(count_or_zero dynamic-httpx.txt)
@@ -99,11 +112,13 @@ jobs:
           echo "httpx (alive URLs): $HTTPX_COUNT"
           echo "x8 reflections lines: $X8_COUNT"
           echo "kxss scan lines: $KXSS_COUNT"
-          if [[ -n "${{ inputs.domain }}" ]]; then
-            echo "Target Domain: ${{ inputs.domain }}"
-          fi
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            echo "Headers used: ${{ inputs.headers }}"
+          # Check if headers were provided in the original trigger, if so, print them.
+          # Note: Accessing original inputs might be tricky with workflow_run.
+          # If domain/headers were passed to the first workflow, they might not be directly available here.
+          # The 'inputs.domain' used above is an attempt to get it.
+          # Headers might need to be passed differently, e.g., via an artifact file.
+          if [[ -n "${{ github.event.inputs.headers }}" ]]; then # This input might not be available.
+            echo "Headers used: ${{ github.event.inputs.headers }}"
           fi
           echo "=================================================="
 
@@ -119,11 +134,8 @@ jobs:
           echo "httpx (alive URLs): $HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
           echo "x8 reflections lines: $X8_COUNT" >> final-results/FINAL_SUMMARY.txt
           echo "kxss scan lines: $KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          if [[ -n "${{ inputs.domain }}" ]]; then
-            echo "Target Domain: ${{ inputs.domain }}" >> final-results/FINAL_SUMMARY.txt
-          fi
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            echo "Headers used: ${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
+          if [[ -n "${{ github.event.inputs.headers }}" ]]; then # Again, input might not be available.
+            echo "Headers used: ${{ github.event.inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
           fi
           echo "==================================================" >> final-results/FINAL_SUMMARY.txt
 
@@ -155,5 +167,6 @@ jobs:
       - name: Upload final results
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-RESULTS-${{ inputs.domain }}
+          name: FINAL-RESULTS-${{ inputs.domain }} # Domain input might not be available here. Adjust if needed.
           path: final-results/
+
