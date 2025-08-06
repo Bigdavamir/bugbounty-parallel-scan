@@ -30,45 +30,40 @@ jobs:
         with:
           path: httpx-results/
           key: httpx-results-*-${{ inputs.run_id }}
-          restore-keys: httpx-results-
+          restore-keys: |
+            httpx-results-
 
       - name: Restore x8 results
         uses: actions/cache@v3
         with:
           path: x8-results/
           key: x8-results-*-${{ inputs.run_id }}
-          restore-keys: x8-results-
+          restore-keys: |
+            x8-results-
 
       - name: Restore kxss results
         uses: actions/cache@v3
         with:
           path: kxss-results/
           key: kxss-results-*-${{ inputs.run_id }}
-          restore-keys: kxss-results-
+          restore-keys: |
+            kxss-results-
 
       - name: Aggregate results and generate summary
         run: |
           echo "Aggregating results..."
           mkdir -p final-results
 
-          # Aggregate httpx results
           find httpx-results/ -name "httpx.txt" -exec cat {} \; > final-results/httpx.txt || echo "No httpx results found."
-
-          # Aggregate x8 results
           find x8-results/ -name "x8.txt" -exec cat {} \; > final-results/x8-brute.txt || echo "No x8 results found."
-
-          # Aggregate kxss results
           find kxss-results/ -name "kxss-output.txt" -exec cat {} \; > final-results/kxss-out.txt || echo "No kxss results found."
 
-          # Parse kxss output for reflected pairs
           if ls kxss-results/*/kxss-output.txt 1> /dev/null 2>&1; then
-            echo "Parsing kxss output for reflected parameters..."
             grep -E '^.*\|.*=KXSS' kxss-results/*/kxss-output.txt | awk -F '|' '{gsub(/^[  ]+|[  ]+$/, "", $2); print $1 " | " $2}' | sort -u > final-results/kxss-reflected-pairs.txt
           else
             touch final-results/kxss-reflected-pairs.txt
           fi
 
-          # Count results
           WAYBACK_COUNT=$(wc -l < combined-results/waybackurls.txt 2>/dev/null || echo 0)
           GAU_COUNT=$(wc -l < combined-results/gau.txt 2>/dev/null || echo 0)
           TOTAL_URLS=$(wc -l < combined-results/all-urls.txt 2>/dev/null || echo 0)
@@ -80,43 +75,49 @@ jobs:
           KXSS_COUNT=$(wc -l < final-results/kxss-out.txt 2>/dev/null || echo 0)
           KXSS_PAIRS=$(wc -l < final-results/kxss-reflected-pairs.txt 2>/dev/null || echo 0)
 
-          # Create summary
-          cat > final-results/bug-hunt-summary.txt << EOF
-          # Bug Bounty Recon Summary for ${{ inputs.domain }}
+          SUMMARY_FILE=final-results/bug-hunt-summary.txt
+          echo "# Bug Bounty Recon Summary for ${{ inputs.domain }}"              >  $SUMMARY_FILE
+          echo                                                                >> $SUMMARY_FILE
+          echo "## URL Gathering"                                             >> $SUMMARY_FILE
+          echo "- Waybackurls: $WAYBACK_COUNT"                               >> $SUMMARY_FILE
+          echo "- GAU URLs: $GAU_COUNT"                                      >> $SUMMARY_FILE
+          echo "- Total Collected URLs: $TOTAL_URLS"                         >> $SUMMARY_FILE
+          echo "- Static URLs: $STATIC_URLS"                                 >> $SUMMARY_FILE
+          echo "- Dynamic URLs: $DYNAMIC_URLS"                               >> $SUMMARY_FILE
+          echo "- Unique Parameters: $PARAMS_COUNT"                          >> $SUMMARY_FILE
+          echo                                                               >> $SUMMARY_FILE
+          echo "## Scanning Results"                                          >> $SUMMARY_FILE
+          echo "- HTTPX Alive URLs: $HTTPX_COUNT"                            >> $SUMMARY_FILE
+          echo "- X8 Brute Force Results: $X8_COUNT"                         >> $SUMMARY_FILE
+          echo "- KXSS Potential XSS: $KXSS_COUNT"                           >> $SUMMARY_FILE
+          echo "- KXSS Reflected Param Pairs: $KXSS_PAIRS"                   >> $SUMMARY_FILE
 
-          ## URL Gathering
-          - Waybackurls: $WAYBACK_COUNT
-          - GAU URLs: $GAU_COUNT
-          - Total Collected URLs: $TOTAL_URLS
-          - Static URLs: $STATIC_URLS
-          - Dynamic URLs: $DYNAMIC_URLS
-          - Unique Parameters: $PARAMS_COUNT
-
-          ## Scanning Results
-          - HTTPX Alive URLs: $HTTPX_COUNT
-          - X8 Brute Force Results: $X8_COUNT
-          - KXSS Potential XSS: $KXSS_COUNT
-          - KXSS Reflected Param Pairs: $KXSS_PAIRS
-          EOF
-
-          # Add top 5 kxss pairs if any
           if [ "$KXSS_PAIRS" -gt 0 ]; then
-            echo -e "
-## Top 5 Reflected Parameter Pairs:" >> final-results/bug-hunt-summary.txt
-            head -5 final-results/kxss-reflected-pairs.txt >> final-results/bug-hunt-summary.txt
+            echo                                                               >> $SUMMARY_FILE
+            echo "## Top 5 Reflected Parameter Pairs:"                         >> $SUMMARY_FILE
+            head -5 final-results/kxss-reflected-pairs.txt                     >> $SUMMARY_FILE
           else
-            echo -e "
-## No Reflected Parameter Pairs Found" >> final-results/bug-hunt-summary.txt
+            echo                                                               >> $SUMMARY_FILE
+            echo "## No Reflected Parameter Pairs Found"                       >> $SUMMARY_FILE
           fi
 
-          # Health check
           if grep -q "1.bigdav.ir" final-results/kxss-reflected-pairs.txt 2>/dev/null; then
-            echo -e "
-## Health Check: PASSED" >> final-results/bug-hunt-summary.txt
+            echo                                                               >> $SUMMARY_FILE
+            echo "## Health Check: PASSED"                                     >> $SUMMARY_FILE
           else
-            echo -e "
-## Health Check: FAILED" >> final-results/bug-hunt-summary.txt
+            echo                                                               >> $SUMMARY_FILE
+            echo "## Health Check: FAILED"                                     >> $SUMMARY_FILE
           fi
 
-          # Copy input files to final results
-          cp combined-results/all-urls.txt final-results/ 2>/dev/null ||
+          cp combined-results/all-urls.txt final-results/ 2>/dev/null || touch final-results/all-urls.txt
+          cp combined-results/dynamic-urls.txt final-results/ 2>/dev/null || touch final-results/dynamic-urls.txt
+          cp combined-results/static-urls.txt final-results/ 2>/dev/null || touch final-results/static-urls.txt
+          cp combined-results/unfurl-params.txt final-results/ 2>/dev/null || touch final-results/unfurl-params.txt
+
+          echo "Summary generation completed."
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v3
+        with:
+          name: bug-hunt-results-${{ inputs.domain }}
+          path: final-results/
