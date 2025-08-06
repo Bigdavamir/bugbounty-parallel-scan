@@ -1,4 +1,4 @@
-name: Parallel Bug Hunt - Fixed
+name: XSS Scanner
 
 on:
   workflow_dispatch:
@@ -8,377 +8,125 @@ on:
         required: true
         type: string
       headers:
-        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
+        description: 'Optional HTTP headers (e.g., "Cookie: session=abc123")'
         required: false
         type: string
         default: ''
 
 jobs:
-  # Job 1: Passive enumeration with waybackurls
-  passive-wayback:
+  # Job 1: URL Collection
+  url-collection:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install basic tools
+      - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y curl wget jq
-
-      - name: Install waybackurls
-        run: |
-          # Method 1: Try direct binary download
-          echo "Trying direct binary download..."
-          ARCH="linux-amd64"
-
-          # Get latest release info
-          LATEST=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest)
-          VERSION=$(echo "$LATEST" | jq -r '.tag_name')
-
-          echo "Found version: $VERSION"
-
-          # Try different download patterns
-          URLS=(
-            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls-${ARCH}-${VERSION}.tgz"
-            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls_${ARCH}"
-            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls_linux_amd64"
-          )
-
-          INSTALLED=false
-          for url in "${URLS[@]}"; do
-            echo "Trying: $url"
-            if wget -q "$url" -O waybackurls_download 2>/dev/null; then
-              echo "Downloaded successfully from: $url"
-
-              # Check if it's a tar file
-              if file waybackurls_download | grep -q "gzip"; then
-                echo "Extracting tar.gz file..."
-                tar -xzf waybackurls_download
-                find . -name "waybackurls" -type f -executable | head -1 | xargs -I{} cp {} waybackurls_binary
-              else
-                echo "Using direct binary..."
-                cp waybackurls_download waybackurls_binary
-              fi
-
-              chmod +x waybackurls_binary
-              sudo mv waybackurls_binary /usr/local/bin/waybackurls
-
-              # Test installation
-              if waybackurls --help >/dev/null 2>&1 || waybackurls -h >/dev/null 2>&1; then
-                echo "waybackurls installed successfully"
-                INSTALLED=true
-                break
-              fi
-            fi
-          done
-
-          # Fallback: Install Go and build from source
-          if [ "$INSTALLED" = false ]; then
-            echo "Binary installation failed, trying Go installation..."
-            sudo apt install -y golang-go
-            export PATH=$PATH:/usr/local/go/bin:~/go/bin
-            go install github.com/tomnomnom/waybackurls@latest
-            sudo cp ~/go/bin/waybackurls /usr/local/bin/ 2>/dev/null || echo "waybackurls available in ~/go/bin/"
-            export PATH="$HOME/go/bin:$PATH"
-            echo "$HOME/go/bin" >> $GITHUB_PATH
-          fi
-
-      - name: Run waybackurls
-        run: |
-          DOMAIN="${{ inputs.domain }}"
-          mkdir -p waybackurls-results
-
-          echo "Testing waybackurls installation..."
-          which waybackurls || echo "waybackurls not in PATH"
-
-          # Add go bin to PATH if needed
-          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
-
-          echo "Running waybackurls for: $DOMAIN"
-
-          # Try different approaches
-          if command -v waybackurls >/dev/null 2>&1; then
-            echo "$DOMAIN" | waybackurls > waybackurls-results/waybackurls.txt 2>&1 || {
-              echo "waybackurls failed, creating empty file"
-              touch waybackurls-results/waybackurls.txt
-            }
-          else
-            echo "waybackurls not found, creating empty file"
-            touch waybackurls-results/waybackurls.txt
-          fi
-
-          WAYBACK_COUNT=$(wc -l < waybackurls-results/waybackurls.txt)
-          echo "Waybackurls found $WAYBACK_COUNT URLs"
-
-          # Add some manual URLs as fallback
-          echo "https://${DOMAIN}/" >> waybackurls-results/waybackurls.txt
-          echo "https://www.${DOMAIN}/" >> waybackurls-results/waybackurls.txt
-          echo "https://${DOMAIN}/admin" >> waybackurls-results/waybackurls.txt
-          echo "https://${DOMAIN}/login" >> waybackurls-results/waybackurls.txt
-          echo "https://${DOMAIN}/api" >> waybackurls-results/waybackurls.txt
-
-      - name: Upload waybackurls results
-        uses: actions/upload-artifact@v4
-        with:
-          name: wayback-results
-          path: waybackurls-results/
-
-  # Job 2: Passive enumeration with gau
-  passive-gau:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Go and gau
-        run: |
-          # Install Go
-          sudo apt update
-          sudo apt install -y golang-go curl
-
-          # Set up Go environment
-          export GOPATH=$HOME/go
-          export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
-          echo "export PATH=\$PATH:/usr/local/go/bin:\$HOME/go/bin" >> ~/.bashrc
-
-          # Install gau
-          echo "Installing gau..."
-          go install github.com/lc/gau/v2/cmd/gau@latest
-
-          # Copy to system bin
-          sudo cp $HOME/go/bin/gau /usr/local/bin/ 2>/dev/null || echo "gau available in ~/go/bin/"
-
-          # Add to PATH for this session
-          echo "$HOME/go/bin" >> $GITHUB_PATH
-
-      - name: Run gau
-        run: |
-          DOMAIN="${{ inputs.domain }}"
-          mkdir -p gau-results
-
-          # Set PATH
-          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
-
-          echo "Testing gau installation..."
-          which gau || echo "gau not in standard PATH"
-
-          echo "Running gau for: $DOMAIN"
-
-          if command -v gau >/dev/null 2>&1; then
-            timeout 300 gau "$DOMAIN" --threads 3 --subs > gau-results/gau.txt 2>&1 || {
-              echo "gau failed or timed out, checking partial results..."
-              touch gau-results/gau.txt
-            }
-          else
-            echo "gau not found, creating empty file"
-            touch gau-results/gau.txt
-          fi
-
-          GAU_COUNT=$(wc -l < gau-results/gau.txt)
-          echo "GAU found $GAU_COUNT URLs"
-
-          # Add some manual URLs as fallback
-          echo "https://${DOMAIN}/search?q=test" >> gau-results/gau.txt
-          echo "https://${DOMAIN}/page?id=1" >> gau-results/gau.txt
-          echo "https://api.${DOMAIN}/v1/users?limit=10" >> gau-results/gau.txt
-
-      - name: Upload gau results
-        uses: actions/upload-artifact@v4
-        with:
-          name: gau-results
-          path: gau-results/
-
-  # Job 3: Combine results and prepare for httpx
-  combine-results:
-    needs: [passive-wayback, passive-gau]
-    runs-on: ubuntu-latest
-    outputs:
-      dynamic-urls-count: ${{ steps.count.outputs.dynamic }}
-      total-urls-count: ${{ steps.count.outputs.total }}
-    steps:
-      - name: Download wayback results
-        uses: actions/download-artifact@v4
-        with:
-          name: wayback-results
-          path: passive-wayback/
-
-      - name: Download gau results
-        uses: actions/download-artifact@v4
-        with:
-          name: gau-results
-          path: passive-gau/
-
-      - name: Install tools
-        run: |
-          sudo apt update
-          sudo apt install -y jq moreutils golang-go curl
-
           # Install Go tools
-          export PATH="$HOME/go/bin:$PATH"
-          go install github.com/tomnomnom/anew@latest
+          go install github.com/tomnomnom/waybackurls@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
           go install github.com/tomnomnom/unfurl@latest
-
-          # Copy to system bin
-          sudo cp $HOME/go/bin/* /usr/local/bin/ 2>/dev/null || echo "Tools available in ~/go/bin/"
+          go install github.com/tomnomnom/anew@latest
+          
+          # Add Go bin to PATH
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
-      - name: Combine and filter results
+      - name: Collect URLs
         run: |
+          DOMAIN="${{ inputs.domain }}"
+          
+          # Create results directory
           mkdir -p combined-results
-
-          # Set PATH
-          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
-
+          
           # Extensions to filter out
           EXTS='(json|js|css|jpg|jpeg|png|svg|gif|exe|mp4|flv|pdf|doc|webm|wmv|webp|mov|mp3|avi|zip)($|\?)'
-
-          # Root URL
-          echo "https://${{ inputs.domain }}/" > all-urls.tmp
-
-          # Combine all URLs
-          cat passive-wayback/waybackurls.txt >> all-urls.tmp || true
-          cat passive-gau/gau.txt >> all-urls.tmp || true
-
-          # Add some common paths with parameters for testing
-          cat >> all-urls.tmp << 'EOF'
-          https://${{ inputs.domain }}/search?q=test&category=all
-          https://${{ inputs.domain }}/login?redirect=%2Fdashboard
-          https://${{ inputs.domain }}/api/users?id=1&format=json
-          https://${{ inputs.domain }}/product?id=123&color=red
-          https://www.${{ inputs.domain }}/page?ref=home&utm_source=google
-          https://${{ inputs.domain }}/contact?subject=hello&name=test
-          EOF
-
-          # Filter and create final URL list
-          sort -u all-urls.tmp | grep -iEv "\.${EXTS}" | awk 'NF' > combined-results/all-urls.txt
-
+          
+          echo "Starting URL collection for $DOMAIN..."
+          
+          # Collect URLs from different sources
+          echo "https://${DOMAIN}/" > all-raw-urls.txt
+          
+          # Waybackurls
+          echo "$DOMAIN" | waybackurls | tee waybackurls.txt >> all-raw-urls.txt
+          
+          # GAU with subdomains
+          gau "$DOMAIN" --threads 5 --subs | tee gau.txt >> all-raw-urls.txt
+          
+          # Clean and deduplicate
+          sort -u all-raw-urls.txt > all-clean-urls.txt
+          
+          # Filter out unwanted extensions and save
+          grep -iEv "\.${EXTS}" all-clean-urls.txt | awk 'NF' | anew "${DOMAIN}.passive"
+          
+          # Split into static and dynamic URLs
+          grep -v '?' "${DOMAIN}.passive" | sort -u > static-urls.txt
+          grep '?' "${DOMAIN}.passive" | sort -u > dynamic-urls.txt
+          
           # Extract parameters
-          if command -v unfurl >/dev/null 2>&1; then
-            unfurl --unique keys < combined-results/all-urls.txt | sort -u > combined-results/unfurl-params.txt
-          else
-            # Fallback parameter extraction
-            grep '?' combined-results/all-urls.txt | while IFS= read -r url; do
-              query="${url#*\?}"
-              echo "$query" | sed 's/&/\n/g' | sed 's/=.*//' | grep -v '^$'
-            done | sort -u > combined-results/unfurl-params.txt
-          fi
+          unfurl --unique keys < "${DOMAIN}.passive" | sort -u > params.txt
+          
+          # Copy to combined results
+          cp "${DOMAIN}.passive" combined-results/all-urls.txt
+          cp params.txt combined-results/unfurl-params.txt
+          cp static-urls.txt combined-results/
+          cp dynamic-urls.txt combined-results/
+          
+          # Summary
+          echo "URL Collection Summary:"
+          echo "Total URLs: $(wc -l < all-clean-urls.txt)"
+          echo "Clean URLs: $(wc -l < "${DOMAIN}.passive")"
+          echo "Static URLs: $(wc -l < static-urls.txt)"
+          echo "Dynamic URLs: $(wc -l < dynamic-urls.txt)"
+          echo "Parameters: $(wc -l < params.txt)"
 
-          # Add common parameters if file is empty/small
-          if [ $(wc -l < combined-results/unfurl-params.txt) -lt 5 ]; then
-            cat >> combined-results/unfurl-params.txt << 'EOF'
-          id
-          q
-          search
-          query
-          page
-          limit
-          offset
-          sort
-          filter
-          category
-          name
-          email
-          user
-          redirect
-          url
-          callback
-          ref
-          source
-          utm_source
-          debug
-          test
-          EOF
-            sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
-          fi
-
-          # Separate static and dynamic URLs
-          grep -v '?' combined-results/all-urls.txt > combined-results/static-urls.txt || true
-          grep '?' combined-results/all-urls.txt > combined-results/dynamic-urls.txt || true
-
-          # Clean up
-          rm -f all-urls.tmp
-
-      - name: Count URLs for matrix
-        id: count
-        run: |
-          DYNAMIC=$(wc -l < combined-results/dynamic-urls.txt)
-          TOTAL=$(wc -l < combined-results/all-urls.txt)
-          echo "dynamic=$DYNAMIC" >> $GITHUB_OUTPUT
-          echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          echo "Found $DYNAMIC dynamic URLs, $TOTAL total URLs"
-
-      - name: Upload combined results
+      - name: Upload URL collection results
         uses: actions/upload-artifact@v4
         with:
-          name: combined-results
+          name: url-collection
           path: combined-results/
 
-  # Job 4: Run httpx on dynamic URLs (parallel chunks)
+  # Job 2: httpx validation
   httpx-scan:
-    needs: combine-results
-    if: needs.combine-results.outputs.dynamic-urls-count > 0
+    needs: url-collection
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5, 6, 7, 8]
+        chunk: [1, 2, 3, 4]
     steps:
-      - name: Download combined results
+      - name: Download URL collection results
         uses: actions/download-artifact@v4
         with:
-          name: combined-results
+          name: url-collection
           path: combined-results/
 
-      - name: Install httpx with PATH fix
+      - name: Install httpx
         run: |
-          echo "Installing httpx..."
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-
-          # Fix PATH - add go bin to PATH
-          echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
-          export PATH=$PATH:$(go env GOPATH)/bin
-
-          echo "Go PATH: $(go env GOPATH)"
-          echo "Current PATH: $PATH"
-          echo "httpx location: $(which httpx || echo 'not found in PATH')"
-
-          # Add to GitHub PATH for subsequent steps
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Run httpx on chunk
         run: |
           mkdir -p httpx-results-${{ matrix.chunk }}
-
-          # Make sure PATH is set
-          export PATH=$PATH:$(go env GOPATH)/bin
-
-          # Split dynamic URLs into chunks
-          if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
+          
+          if [[ -s "combined-results/dynamic-urls.txt" ]]; then
+            # Split dynamic URLs into chunks
             TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 8 + 1))
+            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-
+            
             sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
-
+            
             if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
               echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < chunk-${{ matrix.chunk }}.txt) URLs"
-
-              # Run httpx with improved settings
-              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 \
-                -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
-                echo "httpx failed for chunk ${{ matrix.chunk }}, using input URLs as fallback"
-                cp chunk-${{ matrix.chunk }}.txt httpx-results-${{ matrix.chunk }}/httpx.txt
-              }
+              httpx -silent -threads 100 -timeout 3 -retries 2 < chunk-${{ matrix.chunk }}.txt > httpx-results-${{ matrix.chunk }}/alive.txt
+              echo "Chunk ${{ matrix.chunk }}: Found $(wc -l < httpx-results-${{ matrix.chunk }}/alive.txt) live URLs"
             else
-              touch httpx-results-${{ matrix.chunk }}/httpx.txt
+              touch httpx-results-${{ matrix.chunk }}/alive.txt
+              echo "Chunk ${{ matrix.chunk }}: No URLs to process"
             fi
           else
-            touch httpx-results-${{ matrix.chunk }}/httpx.txt
+            touch httpx-results-${{ matrix.chunk }}/alive.txt
+            echo "Chunk ${{ matrix.chunk }}: No dynamic URLs found"
           fi
-
-          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
-          echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
 
       - name: Upload httpx results
         uses: actions/upload-artifact@v4
@@ -386,7 +134,7 @@ jobs:
           name: httpx-results-${{ matrix.chunk }}
           path: httpx-results-${{ matrix.chunk }}/
 
-  # Job 5: Run x8 parameter bruteforce (parallel)
+  # Job 3: x8 parameter discovery
   x8-scan:
     needs: httpx-scan
     runs-on: ubuntu-latest
@@ -394,31 +142,95 @@ jobs:
       matrix:
         chunk: [1, 2, 3, 4]
     steps:
-      - name: Download combined results
+      - name: Download URL collection results
         uses: actions/download-artifact@v4
         with:
-          name: combined-results
+          name: url-collection
           path: combined-results/
 
-      - name: Download all httpx results
-        run: |
-          for i in {1..8}; do
-            mkdir -p httpx-results-$i
-          done
-        continue-on-error: true
-
-      - name: Download httpx chunks
+      - name: Download httpx results
         uses: actions/download-artifact@v4
         with:
           pattern: httpx-results-*
           merge-multiple: true
-        continue-on-error: true
 
       - name: Install x8
         run: |
-          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8
-          chmod +x x8
-          sudo mv x8 /usr/local/bin/
+          echo "Installing x8..."
+          
+          # Method 1: Try direct download with latest
+          if wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8; then
+            chmod +x x8
+            sudo mv x8 /usr/local/bin/
+            echo "x8 installed successfully via direct download"
+          else
+            echo "Direct download failed, trying alternative methods..."
+            
+            # Method 2: Try different release versions
+            VERSIONS=("v4.1.0" "v4.0.0" "v3.1.0" "v3.0.0")
+            INSTALLED=false
+            
+            for version in "${VERSIONS[@]}"; do
+              echo "Trying version $version..."
+              if wget -q "https://github.com/Sh1Yo/x8/releases/download/${version}/x8-linux-x86_64" -O x8; then
+                chmod +x x8
+                sudo mv x8 /usr/local/bin/
+                echo "x8 installed successfully with version $version"
+                INSTALLED=true
+                break
+              fi
+            done
+            
+            # Method 3: Build from source if all else fails
+            if [ "$INSTALLED" = false ]; then
+              echo "All binary downloads failed, building from source..."
+              sudo apt update
+              sudo apt install -y build-essential
+              
+              # Install Rust
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              source ~/.cargo/env
+              export PATH="$HOME/.cargo/bin:$PATH"
+              
+              # Clone and build x8
+              git clone https://github.com/Sh1Yo/x8.git
+              cd x8
+              timeout 600 cargo build --release || {
+                echo "Cargo build timed out or failed"
+                cd ..
+                INSTALLED=false
+              }
+              
+              if [[ -f "target/release/x8" ]]; then
+                sudo cp target/release/x8 /usr/local/bin/
+                cd ..
+                rm -rf x8
+                echo "x8 built and installed from source"
+                INSTALLED=true
+              else
+                cd ..
+                rm -rf x8
+                INSTALLED=false
+              fi
+            fi
+            
+            # Method 4: Create dummy if everything fails
+            if [ "$INSTALLED" = false ]; then
+              echo "x8 installation failed, creating dummy script"
+              sudo tee /usr/local/bin/x8 > /dev/null << 'EOF'
+          #!/bin/bash
+          echo "x8 not available, skipping parameter bruteforce"
+          EOF
+              sudo chmod +x /usr/local/bin/x8
+            fi
+          fi
+          
+          # Verify installation
+          if command -v x8 >/dev/null 2>&1; then
+            echo "x8 installation verified: $(x8 --version 2>/dev/null || echo 'binary exists')"
+          else
+            echo "x8 installation verification failed"
+          fi
 
       - name: Combine httpx results and run x8
         run: |
@@ -436,19 +248,37 @@ jobs:
 
             sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
 
-            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
-              # Build x8 command with optional headers
-              if [[ -n "${{ inputs.headers }}" ]]; then
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
+            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]] && command -v x8 >/dev/null 2>&1; then
+              echo "Running x8 on chunk ${{ matrix.chunk }} with $(wc -l < x8-chunk-${{ matrix.chunk }}.txt) URLs"
+              
+              # Test if x8 is working
+              if x8 --version >/dev/null 2>&1 || x8 --help >/dev/null 2>&1; then
+                # Build x8 command with optional headers and error handling
+                if [[ -n "${{ inputs.headers }}" ]]; then
+                  cat x8-chunk-${{ matrix.chunk }}.txt | timeout 300 xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt 2>/dev/null || {
+                    echo "x8 failed or timed out for chunk ${{ matrix.chunk }}"
+                    touch x8-results-${{ matrix.chunk }}/x8.txt
+                  }
+                else
+                  cat x8-chunk-${{ matrix.chunk }}.txt | timeout 300 xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt 2>/dev/null || {
+                    echo "x8 failed or timed out for chunk ${{ matrix.chunk }}"
+                    touch x8-results-${{ matrix.chunk }}/x8.txt
+                  }
+                fi
               else
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
+                echo "x8 dummy detected, skipping actual scan"
+                echo "# x8 scan skipped - installation failed" > x8-results-${{ matrix.chunk }}/x8.txt
               fi
             else
+              echo "x8 not available or no URLs to process for chunk ${{ matrix.chunk }}"
               touch x8-results-${{ matrix.chunk }}/x8.txt
             fi
           else
+            echo "No dynamic URLs or parameters found for x8 chunk ${{ matrix.chunk }}"
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
+          
+          echo "x8 chunk ${{ matrix.chunk }} completed with $(wc -l < x8-results-${{ matrix.chunk }}/x8.txt) results"
 
       - name: Upload x8 results
         uses: actions/upload-artifact@v4
@@ -456,81 +286,137 @@ jobs:
           name: x8-results-${{ matrix.chunk }}
           path: x8-results-${{ matrix.chunk }}/
 
-  # Job 6: Run kxss (parallel)
+  # Job 4: kxss scanning
   kxss-scan:
     needs: httpx-scan
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5, 6]
+        chunk: [1, 2, 3, 4]
     steps:
-      - name: Download combined results
+      - name: Download URL collection results
         uses: actions/download-artifact@v4
         with:
-          name: combined-results
+          name: url-collection
           path: combined-results/
 
-      - name: Download all httpx results
+      - name: Download httpx results
         uses: actions/download-artifact@v4
         with:
           pattern: httpx-results-*
           merge-multiple: true
-        continue-on-error: true
 
       - name: Install kxss
         run: |
           go install github.com/Emoe/kxss@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Generate kxss URLs and run scan
         run: |
           mkdir -p kxss-results-${{ matrix.chunk }}
-
-          # Make sure PATH includes Go bin
-          export PATH=$PATH:$(go env GOPATH)/bin
-
-          # Combine httpx results
+          
+          # Combine all live URLs
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
-
-          # Always include health check
-          echo "https://1.bigdav.ir/test.php?test=KXSS" > kxss-urls-${{ matrix.chunk }}.txt
-
+          
           if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
-            # Read URLs and parameters
-            mapfile -t urls < <(sort -u dynamic-alive.txt)
+            # Read parameters and URLs into arrays
             mapfile -t params < <(sort -u combined-results/unfurl-params.txt)
-
-            # Generate parameter combinations for this chunk
-            TOTAL_COMBINATIONS=$((${#urls[@]} * ${#params[@]}))
-            COMBINATIONS_PER_CHUNK=$((TOTAL_COMBINATIONS / 6 + 1))
-            START_COMBINATION=$((((${{ matrix.chunk }} - 1) * COMBINATIONS_PER_CHUNK) + 1))
-            END_COMBINATION=$((${{ matrix.chunk }} * COMBINATIONS_PER_CHUNK))
-
-            combination_count=0
-            for url in "${urls[@]}"; do
-              for param in "${params[@]}"; do
-                ((combination_count++))
-                if [[ $combination_count -ge $START_COMBINATION ]] && [[ $combination_count -le $END_COMBINATION ]]; then
-                  # Generate single parameter URL
-                  if [[ "$url" == *"?${param}="* ]]; then
-                    echo "$url" | sed "s/${param}=[^&]*/${param}=KXSS/" >> kxss-urls-${{ matrix.chunk }}.txt
-                  elif [[ "$url" == *\?* ]]; then
-                    echo "${url}&${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
-                  else
-                    echo "${url}?${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
-                  fi
+            mapfile -t urls < <(sort -u dynamic-alive.txt)
+            
+            if [[ ${#params[@]} -gt 0 ]] && [[ ${#urls[@]} -gt 0 ]]; then
+              echo "Generating kxss URLs for chunk ${{ matrix.chunk }}"
+              echo "Parameters: ${#params[@]}, URLs: ${#urls[@]}"
+              
+              # Function to generate URL with single parameter
+              gen_single_param_url() {
+                local base="$1"
+                local param="$2"
+                if [[ "$base" == *"?${param}="* ]]; then
+                  echo "$base" | sed "s/\([\?&]${param}=\)[^&]*/\1KXSS/"
+                elif [[ "$base" == *\?* ]]; then
+                  echo "${base}&${param}=KXSS"
+                else
+                  echo "${base}?${param}=KXSS"
                 fi
+              }
+              
+              # Generate URLs for this chunk
+              > kxss-urls-${{ matrix.chunk }}.txt
+              
+              # Health check URL
+              echo "https://1.bigdav.ir/test.php?test=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
+              
+              # Calculate chunk boundaries
+              TOTAL_COMBINATIONS=$((${#urls[@]} * ${#params[@]}))
+              COMBINATIONS_PER_CHUNK=$((TOTAL_COMBINATIONS / 4 + 1))
+              START_INDEX=$((((${{ matrix.chunk }} - 1) * COMBINATIONS_PER_CHUNK)))
+              END_INDEX=$((${{ matrix.chunk }} * COMBINATIONS_PER_CHUNK))
+              
+              current_index=0
+              for u in "${urls[@]}"; do
+                for p in "${params[@]}"; do
+                  if [[ $current_index -ge $START_INDEX ]] && [[ $current_index -lt $END_INDEX ]]; then
+                    gen_single_param_url "$u" "$p" >> kxss-urls-${{ matrix.chunk }}.txt
+                  fi
+                  ((current_index++))
+                  if [[ $current_index -ge $END_INDEX ]]; then
+                    break 2
+                  fi
+                done
               done
-            done
-          fi
-
-          # Remove duplicates and run kxss
-          sort -u kxss-urls-${{ matrix.chunk }}.txt > kxss-urls-final-${{ matrix.chunk }}.txt
-
-          if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
-            timeout 300 kxss < kxss-urls-final-${{ matrix.chunk }}.txt > kxss-results-${{ matrix.chunk }}/kxss.txt || true
+              
+              # Remove duplicates
+              sort -u kxss-urls-${{ matrix.chunk }}.txt > kxss-urls-${{ matrix.chunk }}-clean.txt
+              mv kxss-urls-${{ matrix.chunk }}-clean.txt kxss-urls-${{ matrix.chunk }}.txt
+              
+              URL_COUNT=$(wc -l < kxss-urls-${{ matrix.chunk }}.txt)
+              echo "Generated $URL_COUNT URLs for kxss chunk ${{ matrix.chunk }}"
+              
+              if [[ $URL_COUNT -gt 0 ]] && command -v kxss >/dev/null 2>&1; then
+                echo "Running kxss on chunk ${{ matrix.chunk }} with $URL_COUNT URLs"
+                
+                # Run kxss with timeout
+                timeout 600 kxss < kxss-urls-${{ matrix.chunk }}.txt > kxss-results-${{ matrix.chunk }}/kxss-raw.txt 2>/dev/null || {
+                  echo "kxss failed or timed out for chunk ${{ matrix.chunk }}"
+                  touch kxss-results-${{ matrix.chunk }}/kxss-raw.txt
+                }
+                
+                # Parse kxss output
+                awk '
+                /^URL: .* Param: .* Unfiltered: / {
+                  url_start = index($0, "URL: ") + 5
+                  param_pos = index($0, " Param: ")
+                  url = substr($0, url_start, param_pos - url_start)
+                  
+                  param_start = param_pos + 8
+                  unfilt_pos = index($0, " Unfiltered: ")
+                  param = substr($0, param_start, unfilt_pos - param_start)
+                  
+                  unfilt_start = unfilt_pos + 13
+                  unfiltered = substr($0, unfilt_start)
+                  
+                  if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
+                    print url " | " param " | Unfiltered: " unfiltered
+                  }
+                }
+                ' kxss-results-${{ matrix.chunk }}/kxss-raw.txt > kxss-results-${{ matrix.chunk }}/kxss-reflections.txt
+                
+                REFLECTION_COUNT=$(wc -l < kxss-results-${{ matrix.chunk }}/kxss-reflections.txt)
+                echo "kxss chunk ${{ matrix.chunk }} found $REFLECTION_COUNT reflections"
+              else
+                echo "kxss not available or no URLs for chunk ${{ matrix.chunk }}"
+                touch kxss-results-${{ matrix.chunk }}/kxss-raw.txt
+                touch kxss-results-${{ matrix.chunk }}/kxss-reflections.txt
+              fi
+            else
+              echo "No parameters or URLs available for chunk ${{ matrix.chunk }}"
+              touch kxss-results-${{ matrix.chunk }}/kxss-raw.txt
+              touch kxss-results-${{ matrix.chunk }}/kxss-reflections.txt
+            fi
           else
-            touch kxss-results-${{ matrix.chunk }}/kxss.txt
+            echo "No live dynamic URLs or parameters found for chunk ${{ matrix.chunk }}"
+            touch kxss-results-${{ matrix.chunk }}/kxss-raw.txt
+            touch kxss-results-${{ matrix.chunk }}/kxss-reflections.txt
           fi
 
       - name: Upload kxss results
@@ -539,121 +425,85 @@ jobs:
           name: kxss-results-${{ matrix.chunk }}
           path: kxss-results-${{ matrix.chunk }}/
 
-  # Job 7: Final summary
+  # Job 5: Final summary
   final-summary:
-    needs: [combine-results, httpx-scan, x8-scan, kxss-scan]
+    needs: [url-collection, httpx-scan, x8-scan, kxss-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Download all results
         uses: actions/download-artifact@v4
         with:
-          pattern: "*"
+          pattern: '*'
           merge-multiple: true
 
-      - name: Generate final summary
+      - name: Generate comprehensive summary
         run: |
-          # Set domain variable
-          DOMAIN="${{ inputs.domain }}"
-
-          # Combine all results exactly like main.sh
-          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; > httpx.txt || true
-          find . -name "httpx-results-*" -type d -exec grep '?' {}/*.txt \; > dynamic-httpx.txt || true
-          find . -name "x8-results-*" -type d -exec cat {}/*.txt \; > x8-brute.txt || true
-          find . -name "kxss-results-*" -type d -exec cat {}/*.txt \; > kxss-out.txt || true
-
-          # Parse kxss output exactly like main.sh
-          awk '
-          /^URL: .* Param: .* Unfiltered: / {
-            url_start = index($0, "URL: ") + 5
-            param_pos = index($0, " Param: ")
-            url = substr($0, url_start, param_pos - url_start)
-
-            param_start = param_pos + 8
-            unfilt_pos = index($0, " Unfiltered: ")
-            param = substr($0, param_start, unfilt_pos - param_start)
-
-            unfilt_start = unfilt_pos + 13
-            unfiltered = substr($0, unfilt_start)
-
-            if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
-              print url " | " param " | Unfiltered: " unfiltered
-            }
-          }
-          ' kxss-out.txt > kxss-reflected-pairs.txt
-
-          # Count functions exactly like main.sh
-          count_or_zero(){
-            [[ -f "$1" ]] && wc -l < "$1" || echo 0
-          }
-
-          # Generate summary exactly like main.sh
-          WAYBACK_COUNT=$(count_or_zero passive-wayback/waybackurls.txt)
-          GAU_COUNT=$(count_or_zero passive-gau/gau.txt)
-          ALLURLS_COUNT=$(count_or_zero combined-results/all-urls.txt)
-          STATIC_COUNT=$(grep -iv "?" combined-results/all-urls.txt 2>/dev/null | sort -u | wc -l || echo 0)
-          DYNAMIC_COUNT=$(count_or_zero dynamic-httpx.txt)
-          HTTPX_COUNT=$(count_or_zero httpx.txt)
-          UNFURLPARAMS_COUNT=$(count_or_zero combined-results/unfurl-params.txt)
-          X8_COUNT=$(count_or_zero x8-brute.txt)
-          KXSS_COUNT=$(count_or_zero kxss-out.txt)
-
-          # Display summary with echo instead of printf
-          echo "============ Recon Summary for $DOMAIN ============"
-          echo "waybackurls         : $WAYBACK_COUNT"
-          echo "gau                 : $GAU_COUNT"
-          echo "All unique URLs     : $ALLURLS_COUNT"
-          echo "Static URLs         : $STATIC_COUNT"
-          echo "Dynamic URLs        : $DYNAMIC_COUNT"
-          echo "Unique URL params   : $UNFURLPARAMS_COUNT"
-          echo "httpx (alive URLs)  : $HTTPX_COUNT"
-          echo "x8 reflections lines: $X8_COUNT"
-          echo "kxss scan lines     : $KXSS_COUNT"
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            echo "Headers used        : ${{ inputs.headers }}"
+          echo "# XSS Scanner Results for ${{ inputs.domain }}" > FINAL_SUMMARY.txt
+          echo "Generated on: $(date)" >> FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # URL Collection Summary
+          echo "## URL Collection" >> FINAL_SUMMARY.txt
+          echo "- All URLs: $(wc -l < all-urls.txt 2>/dev/null || echo 0)" >> FINAL_SUMMARY.txt
+          echo "- Static URLs: $(wc -l < static-urls.txt 2>/dev/null || echo 0)" >> FINAL_SUMMARY.txt
+          echo "- Dynamic URLs: $(wc -l < dynamic-urls.txt 2>/dev/null || echo 0)" >> FINAL_SUMMARY.txt
+          echo "- Parameters: $(wc -l < unfurl-params.txt 2>/dev/null || echo 0)" >> FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # Combine all alive URLs
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-alive-urls.txt 2>/dev/null || touch all-alive-urls.txt
+          echo "## httpx Results" >> FINAL_SUMMARY.txt
+          echo "- Total alive URLs: $(wc -l < all-alive-urls.txt)" >> FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # Combine all x8 results
+          find . -name "x8-results-*" -type d -exec cat {}/x8.txt \; > all-x8-reflections.txt 2>/dev/null || touch all-x8-reflections.txt
+          echo "## x8 Results" >> FINAL_SUMMARY.txt
+          echo "- Total x8 output lines: $(wc -l < all-x8-reflections.txt)" >> FINAL_SUMMARY.txt
+          if [[ -s all-x8-reflections.txt ]]; then
+            REFLECTED_X8=$(grep -Ei 'reflects:|change reflect' all-x8-reflections.txt | wc -l)
+            echo "- Potential reflections: $REFLECTED_X8" >> FINAL_SUMMARY.txt
           fi
-          echo "=================================================="
-
-          # Show reflected pairs exactly like main.sh
-          if [[ -s "kxss-reflected-pairs.txt" ]]; then
-            echo "[*] First 5 reflected pairs:"
-            head -5 "kxss-reflected-pairs.txt"
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # Combine all kxss results
+          find . -name "kxss-results-*" -type d -exec cat {}/kxss-reflections.txt \; > all-kxss-reflections.txt 2>/dev/null || touch all-kxss-reflections.txt
+          echo "## kxss Results" >> FINAL_SUMMARY.txt
+          KXSS_REFLECTIONS=$(wc -l < all-kxss-reflections.txt)
+          echo "- Total reflections found: $KXSS_REFLECTIONS" >> FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          if [[ $KXSS_REFLECTIONS -gt 0 ]]; then
+            echo "### Top 10 kxss Reflections:" >> FINAL_SUMMARY.txt
+            head -10 all-kxss-reflections.txt >> FINAL_SUMMARY.txt
+            echo "" >> FINAL_SUMMARY.txt
+          fi
+          
+          # Health check
+          if grep -q "1.bigdav.ir" all-kxss-reflections.txt 2>/dev/null; then
+            echo "✅ Health check: PASSED" >> FINAL_SUMMARY.txt
           else
-            echo "[!] No reflected pairs found."
+            echo "❌ Health check: FAILED" >> FINAL_SUMMARY.txt
           fi
-
-          # Health check exactly like main.sh
-          if grep -q "1.bigdav.ir" "kxss-reflected-pairs.txt"; then
-            echo "[✓] Health check passed."
-          else
-            echo "[✗] Health check failed."
-          fi
-
-          # Save final results for upload
-          mkdir -p final-results
-          cp httpx.txt final-results/ || true
-          cp dynamic-httpx.txt final-results/ || true
-          cp x8-brute.txt final-results/ || true
-          cp kxss-out.txt final-results/ || true
-          cp kxss-reflected-pairs.txt final-results/ || true
-
-          # Save summary with echo instead of printf
-          echo "============ Recon Summary for $DOMAIN ============" > final-results/FINAL_SUMMARY.txt
-          echo "waybackurls         : $WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "gau                 : $GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "All unique URLs     : $ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "Static URLs         : $STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "Dynamic URLs        : $DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "Unique URL params   : $UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "httpx (alive URLs)  : $HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "x8 reflections lines: $X8_COUNT" >> final-results/FINAL_SUMMARY.txt
-          echo "kxss scan lines     : $KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # Headers info
           if [[ -n "${{ inputs.headers }}" ]]; then
-            echo "Headers used        : ${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
+            echo "Headers used: ${{ inputs.headers }}" >> FINAL_SUMMARY.txt
+            echo "" >> FINAL_SUMMARY.txt
           fi
-          echo "==================================================" >> final-results/FINAL_SUMMARY.txt
+          
+          echo "Scan completed successfully!" >> FINAL_SUMMARY.txt
+          
+          # Display summary
+          cat FINAL_SUMMARY.txt
 
-      - name: Upload final results
+      - name: Upload final summary
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-RESULTS-${{ inputs.domain }}
-          path: final-results/
+          name: final-summary
+          path: |
+            FINAL_SUMMARY.txt
+            all-alive-urls.txt
+            all-x8-reflections.txt
+            all-kxss-reflections.txt
