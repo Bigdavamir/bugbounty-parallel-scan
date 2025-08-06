@@ -1,0 +1,105 @@
+name: 1-URL Collection
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain (e.g., example.com)'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      domain:
+        required: true
+        type: string
+
+jobs:
+  collect-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go tools
+        run: |
+          go install github.com/tomnomnom/waybackurls@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/tomnomnom/unfurl@latest
+          go install github.com/tomnomnom/anew@latest
+
+      - name: Collect URLs
+        run: |
+          DOMAIN="${{ inputs.domain }}"
+          echo "🔍 Collecting URLs for: $DOMAIN"
+          
+         # Create test URLs as fallback
+          echo "https://$DOMAIN" > all-raw-urls.txt
+          echo "https://$DOMAIN/?q=test" >> all-raw-urls.txt
+          echo "https://$DOMAIN/search?query=test" >> all-raw-urls.txt
+          
+          # Collect from wayback with timeout
+          echo "📡 Running waybackurls..."
+          timeout 300 waybacurls $DOMAIN 2>/dev/null | head -2000 | anew all-raw-urls.txt || true
+          
+          # Collect from gau with timeout
+          echo "📡 Running gau..."
+          timeout300 gau $DOMAIN --subs --threads 5 2>/dev/null | head -2000 | anew all-raw-urls.txt || true
+          
+          # Filter out unwanted extensions
+          EXTS="json|js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|eot|ico|pdf|zip|rar|tar|gz|mp3|mp4|avi|mov|wmv|flv|webm|webp"
+          
+          cat all-raw-urls.txt | \
+          grep -iEv "\.($EXTS)(\?|$)" | \
+          grep -E "^https?://" | \
+          sort -u > all-clean-urls.txt
+          
+          # Separate dynamic and static URLs
+          grep "\?" all-clean-urls.txt > dynamic-urls.txt || echo "https://$DOMAIN/?q=test" > dynamic-urls.txt
+          grep -v "\?" all-clean-urls.txt | head -500 > static-urls.txt || echo "https://$DOMAIN" > static-urls.txt
+          
+          # Extract parameters
+          unfurl -u keys < dynamic-urls.txt | sort -u > params.txt || echo -e "q
+query
+search
+id
+page
+test" > params.txt
+          
+          # Summary
+          echo "✅ URL Collection Summary:"
+          echo "- Total clean URLs: $(wc -l < all-clean-urls.txt)"
+          echo "- Dynamic URLs: $(wc -l < dynamic-urls.txt)"
+          echo "- Static URLs: $(wc -l < static-urls.txt)"
+          echo "- Unique parameters: $(wc -l < params.txt)"
+
+      - name: Upload URL collection
+        uses: actions/upload-artifact@v4
+        with:
+          name: url-collection-${{ github.run_id }}
+          retention-days: 1
+          path: |
+            all-raw-urls.txt
+            all-clean-urls.txt
+            dynamic-urls.txt
+            static-urls.txt
+            params.txt
+
+  trigger-scanning:
+    needs: collect-urls
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger scanning workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: '2-scanning.yml',
+              ref: 'main',
+              inputs: {
+                domain: '${{ inputs.domain }}',
+                run_id: '${{ github.run_id }}'
+              }
+            });
+            console.log('Triggered scanning workflow');
