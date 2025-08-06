@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5, 6, 7, 8]
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - name: Restore combined results
         uses: actions/cache@v4
@@ -30,13 +30,9 @@ jobs:
 
       - name: Install httpx with PATH fix
         run: |
-          echo "Installing httpx..."
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
           export PATH=$PATH:$(go env GOPATH)/bin
-          echo "Go PATH: $(go env GOPATH)"
-          echo "Current PATH: $PATH"
-          echo "httpx location: $(which httpx || echo 'not found in PATH')"
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run httpx on chunk (with debug)
@@ -47,15 +43,17 @@ jobs:
           ls -lh combined-results/ || true
           wc -l combined-results/dynamic-urls.txt || true
           head -10 combined-results/dynamic-urls.txt || true
+
           if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
             TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 8 + 1))
+            LINES_PER_CHUNK=$((TOTAL_LINES / 10 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
             echo "==== [httpx debug] chunk-${{ matrix.chunk }}.txt ===="
             wc -l chunk-${{ matrix.chunk }}.txt || true
             head -10 chunk-${{ matrix.chunk }}.txt || true
+
             if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
               echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < chunk-${{ matrix.chunk }}.txt) URLs"
               cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
@@ -68,6 +66,7 @@ jobs:
           else
             touch httpx-results-${{ matrix.chunk }}/httpx.txt
           fi
+
           echo "==== [httpx debug] Output httpx-results-${{ matrix.chunk }}/httpx.txt ===="
           wc -l httpx-results-${{ matrix.chunk }}/httpx.txt || true
           head -10 httpx-results-${{ matrix.chunk }}/httpx.txt || true
@@ -85,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4]
+        chunk: [1, 2, 3, 4, 5]
     steps:
       - name: Restore combined results
         uses: actions/cache@v4
@@ -99,7 +98,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: httpx-results/
-          key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
+          key: httpx-results-*-${{ inputs.run_id }}
           restore-keys: |
             httpx-results-
 
@@ -115,7 +114,7 @@ jobs:
             fi
           fi
           echo '#!/bin/bash' > /usr/local/bin/x8_fallback.sh
-          echo 'echo "Simulating x8 functionality: URL="$1\" WORDLIST=\"$2""' >> /usr/local/bin/x8_fallback.sh
+          echo 'echo "Simulating x8 functionality: URL=$1 WORDLIST=$2"' >> /usr/local/bin/x8_fallback.sh
           echo 'echo "Error: Fallback script executed. Real x8 not found. Please check installation."' >> /usr/local/bin/x8_fallback.sh
           chmod +x /usr/local/bin/x8_fallback.sh
           if ! command -v x8 >/dev/null 2>&1; then
@@ -139,7 +138,7 @@ jobs:
 
           if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
             TOTAL_LINES=$(wc -l < dynamic-alive.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
+            LINES_PER_CHUNK=$((TOTAL_LINES / 5 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
