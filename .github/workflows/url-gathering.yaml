@@ -118,7 +118,7 @@ jobs:
           echo "https://${DOMAIN}/api" >> waybackurls-results/waybackurls.txt
 
       - name: Cache waybackurls results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: waybackurls-results/
           key: wayback-results-${{ inputs.run_id }}
