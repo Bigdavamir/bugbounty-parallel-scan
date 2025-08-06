@@ -51,10 +51,12 @@ jobs:
           wget -q -O gau "$GAU_URL"
           chmod +x gau && sudo mv gau $BIN_DIR/
 
-          # httpx
+          # httpx (fixed block, use .tar.gz)
           HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d '"' -f4)
-          curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.zip" -o httpx.zip
-          unzip -o httpx.zip -d . && sudo mv httpx $BIN_DIR/ && rm -f httpx.zip
+          curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.tar.gz" -o httpx.tar.gz
+          tar -xzf httpx.tar.gz httpx
+          sudo mv httpx $BIN_DIR/
+          rm -f httpx.tar.gz
 
           # x8
           X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep tag_name | cut -d '"' -f4)
