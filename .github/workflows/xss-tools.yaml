@@ -1,25 +1,17 @@
-name: XSS Tools Execution
+name: "XSS Tools Execution"
 
 on:
-  workflow_dispatch: # Keep this for manual triggering if needed
-    inputs:
-      domain:
-        description: 'Target domain'
-        required: true
-        default: 'example.com'
-      headers:
-        description: 'Custom headers (optional)'
-        required: false
-  workflow_run: # Trigger this workflow when 'Parallel Bug Hunt - Part 1' completes
-    workflows:
-      - "Parallel Bug Hunt - Part 1" # Name of the workflow to watch
+  workflow_run: # Trigger this workflow when 'Parallel Bug Hunt - Part1' completes
+    workflows: ["Parallel Bug Hunt - Part1"] # Name of the workflow file (url-gathering.yaml)
     types:
-      - completed # Only trigger when the other workflow is completed
+      - completed
 
 jobs:
-  # Job 1: Run httpx on dynamic URLs (parallel chunks)
+  # Job 4: Run httpx on dynamic URLs (parallel chunks)
   httpx-scan:
     runs-on: ubuntu-latest
+    # Only run if the previous workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6, 7, 8]
@@ -27,33 +19,47 @@ jobs:
       - name: Download combined results from previous stage
         uses: actions/download-artifact@v4
         with:
-          name: combined-results # Assuming url-gathering uploads results with this name
+          name: combined-results # Artifact name from url-gathering.yaml
           path: combined-results/
 
       - name: Install httpx with PATH fix
         run: |
           echo "Installing httpx..."
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+
+          # Fix PATH - add go bin to PATH
           echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
           export PATH=$PATH:$(go env GOPATH)/bin
+
           echo "Go PATH: $(go env GOPATH)"
           echo "Current PATH: $PATH"
           echo "httpx location: $(which httpx || echo 'not found in PATH')"
+
+          # Add to GitHub PATH for subsequent steps
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run httpx on chunk
         run: |
           mkdir -p httpx-results-${{ matrix.chunk }}
+
+          # Make sure PATH is set
           export PATH=$PATH:$(go env GOPATH)/bin
+
+          # Split dynamic URLs into chunks
           if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
             TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 8 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+
             sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
+
             if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
               echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < chunk-${{ matrix.chunk }}.txt) URLs"
-              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
+
+              # Run httpx with improved settings
+              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 \
+                -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
                 echo "httpx failed for chunk ${{ matrix.chunk }}, using input URLs as fallback"
                 cp chunk-${{ matrix.chunk }}.txt httpx-results-${{ matrix.chunk }}/httpx.txt
               }
@@ -63,7 +69,8 @@ jobs:
           else
             touch httpx-results-${{ matrix.chunk }}/httpx.txt
           fi
-          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
+
+          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}.txt)
           echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
 
       - name: Upload httpx results
@@ -72,10 +79,13 @@ jobs:
           name: httpx-results-${{ matrix.chunk }}
           path: httpx-results-${{ matrix.chunk }}/
 
-  # Job 2: Run x8 parameter bruteforce (parallel)
+  # Job 5: Run x8 parameter bruteforce (parallel)
   x8-scan:
+    # Depend on the httpx_scan job within this workflow
     needs: httpx-scan
     runs-on: ubuntu-latest
+    # Only run if the previous workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     strategy:
       matrix:
         chunk: [1, 2, 3, 4]
@@ -87,6 +97,13 @@ jobs:
           path: combined-results/
 
       - name: Download all httpx results
+        run: |
+          for i in {1..8}; do
+            mkdir -p httpx-results-$i
+          done
+        continue-on-error: true
+
+      - name: Download httpx chunks
         uses: actions/download-artifact@v4
         with:
           pattern: httpx-results-*
@@ -95,16 +112,23 @@ jobs:
 
       - name: Install x8
         run: |
+          # Method 1: Try direct download first
           wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && command -v x8 && echo "x8 installed via direct download" && exit 0 || echo "Direct download failed, trying cargo..."
+
+          # Method 2: Try cargo install
           curl https://sh.rustup.rs -sSf | sh -s -- -y
           source "$HOME/.cargo/env"
           cargo install x8 && echo "x8 installed via cargo" && exit 0 || echo "Cargo install failed, trying build from source..."
+
+          # Method 3: Try building from source
           if command -v go >/dev/null 2>&1; then
             if ! command -v x8 >/dev/null 2>&1; then
               echo "Building from source failed. Creating a fallback script..."
             fi
           fi
-          # Create a fallback script using a simple echo command
+
+          # Method 4: Create a fallback script using a simple echo command
+          # This avoids complex heredoc parsing issues
           echo '#!/bin/bash' > /usr/local/bin/x8_fallback.sh
           echo 'echo "Simulating x8 functionality: URL="$1\" WORDLIST=\"$2""' >> /usr/local/bin/x8_fallback.sh
           echo 'echo "Error: Fallback script executed. Real x8 not found. Please check installation."' >> /usr/local/bin/x8_fallback.sh
@@ -119,14 +143,21 @@ jobs:
       - name: Combine httpx results and run x8
         run: |
           mkdir -p x8-results-${{ matrix.chunk }}
+
+          # Combine all httpx results
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
+
           if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            # Split for parallel processing
             TOTAL_LINES=$(wc -l < dynamic-alive.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+
             sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
+
             if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
+              # Build x8 command with optional headers
               if [[ -n "${{ inputs.headers }}" ]]; then
                 cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
               else
@@ -145,10 +176,12 @@ jobs:
           name: x8-results-${{ matrix.chunk }}
           path: x8-results-${{ matrix.chunk }}/
 
-  # Job 3: Run kxss (parallel)
+  # Job 6: Run kxss (parallel)
   kxss-scan:
     needs: httpx-scan
     runs-on: ubuntu-latest
+    # Only run if the previous workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6]
@@ -174,21 +207,33 @@ jobs:
       - name: Generate kxss URLs and run scan
         run: |
           mkdir -p kxss-results-${{ matrix.chunk }}
+
+          # Make sure PATH includes Go bin
           export PATH=$PATH:$(go env GOPATH)/bin
+
+          # Combine httpx results
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
+
+          # Always include health check
           echo "https://1.bigdav.ir/test.php?test=KXSS" > kxss-urls-${{ matrix.chunk }}.txt
+
           if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            # Read URLs and parameters
             mapfile -t urls < <(sort -u dynamic-alive.txt)
             mapfile -t params < <(sort -u combined-results/unfurl-params.txt)
+
+            # Generate parameter combinations for this chunk
             TOTAL_COMBINATIONS=$((${#urls[@]} * ${#params[@]}))
             COMBINATIONS_PER_CHUNK=$((TOTAL_COMBINATIONS / 6 + 1))
             START_COMBINATION=$((((${{ matrix.chunk }} - 1) * COMBINATIONS_PER_CHUNK) + 1))
             END_COMBINATION=$((${{ matrix.chunk }} * COMBINATIONS_PER_CHUNK))
+
             combination_count=0
             for url in "${urls[@]}"; do
               for param in "${params[@]}"; do
                 ((combination_count++))
                 if [[ $combination_count -ge $START_COMBINATION ]] && [[ $combination_count -le $END_COMBINATION ]]; then
+                  # Generate single parameter URL
                   if [[ "$url" == *"?${param}="* ]]; then
                     echo "$url" | sed "s/?${param}=[^&]*/?${param}=KXSS/" >> kxss-urls-${{ matrix.chunk }}.txt
                   elif [[ "$url" == *\?* ]]; then
@@ -200,7 +245,10 @@ jobs:
               done
             done
           fi
+
+          # Remove duplicates and run kxss
           sort -u kxss-urls-${{ matrix.chunk }}.txt > kxss-urls-final-${{ matrix.chunk }}.txt
+
           if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
             timeout 300 kxss < kxss-urls-final-${{ matrix.chunk }}.txt > kxss-results-${{ matrix.chunk }}/kxss.txt || true
           else
@@ -213,10 +261,123 @@ jobs:
           name: kxss-results-${{ matrix.chunk }}
           path: kxss-results-${{ matrix.chunk }}/
 
-      - name: Trigger the next workflow (XSS Summary)
-        uses: benc-uk/workflow-dispatch@v1
+  # Job 7: Final summary
+  final-summary:
+    # Depend on the scan jobs within this workflow
+    needs: [httpx-scan, x8-scan, kxss-scan]
+    runs-on: ubuntu-latest
+    # Only run if the previous workflow completed successfully
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Download all results from previous jobs
+        uses: actions/download-artifact@v4
         with:
-          workflow: XSS Summary # This should match the name in xss-summary.yaml
-          repo: ${{ github.repository }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          inputs: '{"domain": "${{ inputs.domain }}", "headers": "${{ inputs.headers }}"}'
+          pattern: "*" # Downloads all artifacts from httpx, x8, kxss jobs
+          merge-multiple: true
+
+      - name: Generate final summary
+        run: |
+          # Set domain variable - if it was passed to the first workflow, it might be available in inputs
+          # If not, you might need to pass it differently or hardcode it for testing.
+          DOMAIN="${{ inputs.domain }}"
+          if [[ -z "$DOMAIN" ]]; then
+            # Fallback if domain input is not available in this workflow context
+            # This might require passing the domain as an environment variable or using a file
+            # For now, let's assume it's available or we use a placeholder
+            DOMAIN="target-domain.com" # Placeholder
+            echo "Domain input not found, using placeholder: $DOMAIN"
+          fi
+
+          # Combine all results exactly like main.sh
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; > httpx.txt || true
+          find . -name "httpx-results-*" -type d -exec grep '?' {}/*.txt \; > dynamic-httpx.txt || true
+          find . -name "x8-results-*" -type d -exec cat {}/*.txt \; > x8-brute.txt || true
+          find . -name "kxss-results-*" -type d -exec cat {}/*.txt \; > kxss-out.txt || true
+
+          # Parse kxss output exactly like main.sh
+          awk '
+          /^URL: .* Param: .* Unfiltered: / {
+            url_start = index($0, "URL: ") + 5
+            param_pos = index($0, " Param: ")
+            url = substr($0, url_start, param_pos - url_start)
+
+            param_start = param_pos + 8
+            unfilt_pos = index($0, " Unfiltered: ")
+            param = substr($0, param_start, unfilt_pos - param_start)
+
+            unfilt_start = unfilt_pos + 13
+            unfiltered = substr($0, unfilt_start)
+
+            if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
+              print url " | " param " | Unfiltered: " unfiltered
+            }
+          }
+          ' kxss-out.txt > kxss-reflected-pairs.txt
+
+          # Count functions exactly like main.sh
+          count_or_zero(){
+            [[ -f "$1" ]] && wc -l < "$1" || echo 0
+          }
+
+          # Generate summary exactly like main.sh
+          # Note: These counts rely on artifacts from the FIRST workflow (url-gathering.yaml)
+          # Ensure 'combined-results' artifact contains these files (e.g., static-urls.txt, unfurl-params.txt)
+          WAYBACK_COUNT=$(count_or_zero passive-wayback/waybackurls.txt) # This artifact might not be available here unless downloaded explicitly
+          GAU_COUNT=$(count_or_zero passive-gau/gau.txt)             # This artifact might not be available here unless downloaded explicitly
+          ALLURLS_COUNT=$(count_or_zero combined-results/all-urls.txt)
+          STATIC_COUNT=$(grep -iv "?" combined-results/all-urls.txt 2>/dev/null | sort -u | wc -l || echo 0)
+          DYNAMIC_COUNT=$(count_or_zero dynamic-httpx.txt)
+          HTTPX_COUNT=$(count_or_zero httpx.txt)
+          UNFURLPARAMS_COUNT=$(count_or_zero combined-results/unfurl-params.txt)
+          X8_COUNT=$(count_or_zero x8-brute.txt)
+          KXSS_COUNT=$(count_or_zero kxss-out.txt)
+
+          # Build summary lines using echo
+          echo "============ Recon Summary for $DOMAIN ============" > final-results/FINAL_SUMMARY.txt
+          echo "waybackurls: $WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "gau: $GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "All unique URLs: $ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Static URLs: $STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Dynamic URLs: $DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Unique URL params: $UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "httpx (alive URLs): $HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "x8 reflections lines: $X8_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "kxss scan lines: $KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          # Check if inputs.headers is available, if not, skip
+          if [[ -n "${{ github.event.inputs.headers }}" ]]; then
+            echo "Headers used: ${{ github.event.inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
+          fi
+          echo "==================================================" >> final-results/FINAL_SUMMARY.txt
+
+          # Show reflected pairs exactly like main.sh
+          if [[ -s "kxss-reflected-pairs.txt" ]]; then
+            echo "[*] First 5 reflected pairs:"
+            head -5 "kxss-reflected-pairs.txt"
+          else
+            echo "[!] No reflected pairs found."
+          fi
+
+          # Health check exactly like main.sh
+          if grep -q "1.bigdav.ir" "kxss-reflected-pairs.txt"; then
+            echo "[✓] Health check passed."
+          else
+            echo "[✗] Health check failed."
+          fi
+
+          # Save final results for upload
+          mkdir -p final-results
+          cp httpx.txt final-results/ || true
+          cp dynamic-httpx.txt final-results/ || true
+          cp x8-brute.txt final-results/ || true
+          cp kxss-out.txt final-results/ || true
+          cp kxss-reflected-pairs.txt final-results/ || true
+
+          # Copy the generated summary to final-results as well
+          cp final-results/FINAL_SUMMARY.txt final-results/ || true
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-RESULTS-${{ inputs.domain }} # Using inputs.domain here, may need adjustment
+          path: final-results/
+
