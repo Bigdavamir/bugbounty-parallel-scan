@@ -1,0 +1,281 @@
+name: 2 Security Scanning
+
+on:
+  workflow_run:
+    workflows: ["1 URL Collection"]
+    types:
+      - completed
+
+jobs:
+  x8-scan:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4]
+    steps:
+      - name: Download URL collection results
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: url-collection-results
+          path: url-collection-results/
+
+      - name: Install x8
+        run: |
+          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8
+          chmod +x x8
+          sudo mv x8 /usr/local/bin/
+
+      - name: Run x8 parameter bruteforce
+        run: |
+          mkdir -p x8-results-${{ matrix.chunk }}
+          
+          # Read domain and headers
+          DOMAIN=$(cat url-collection-results/domain.txt)
+          HEADERS=$(cat url-collection-results/headers.txt)
+          
+          # Get only alive dynamic URLs
+          grep '?' url-collection-results/all-alive-urls.txt > dynamic-alive.txt || true
+          
+          if [[ -s "dynamic-alive.txt" ]] && [[ -s "url-collection-results/params.txt" ]]; then
+            # Split for parallel processing
+            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+
+            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
+
+            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
+              echo "Running x8 on chunk ${{ matrix.chunk }} with $(wc -l < x8-chunk-${{ matrix.chunk }}.txt) URLs"
+              
+              # Build x8 command with optional headers
+              if [[ -n "$HEADERS" ]]; then
+                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w url-collection-results/params.txt -X GET POST -H "$HEADERS" > x8-results-${{ matrix.chunk }}/x8.txt || true
+              else
+                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w url-collection-results/params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
+              fi
+              
+              X8_COUNT=$(wc -l < x8-results-${{ matrix.chunk }}/x8.txt)
+              echo "x8 chunk ${{ matrix.chunk }} found $X8_COUNT reflections"
+            else
+              touch x8-results-${{ matrix.chunk }}/x8.txt
+            fi
+          else
+            touch x8-results-${{ matrix.chunk }}/x8.txt
+          fi
+
+      - name: Upload x8 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: x8-results-${{ matrix.chunk }}
+          path: x8-results-${{ matrix.chunk }}/
+
+  kxss-scan:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Download URL collection results
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: url-collection-results
+          path: url-collection-results/
+
+      - name: Install kxss
+        run: |
+          go install github.com/Emoe/kxss@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Generate kxss URLs and run scan
+        run: |
+          mkdir -p kxss-results-${{ matrix.chunk }}
+          export PATH=$PATH:$(go env GOPATH)/bin
+
+          # Health check URL
+          echo "https://1.bigdav.ir/test.php?test=KXSS" > kxss-urls-${{ matrix.chunk }}.txt
+
+          # Get alive dynamic URLs
+          grep '?' url-collection-results/all-alive-urls.txt > dynamic-alive.txt || true
+
+          if [[ -s "dynamic-alive.txt" ]] && [[ -s "url-collection-results/params.txt" ]]; then
+            # Read URLs and parameters
+            mapfile -t urls < <(sort -u dynamic-alive.txt)
+            mapfile -t params < <(sort -u url-collection-results/params.txt)
+
+            # Generate parameter combinations for this chunk
+            TOTAL_COMBINATIONS=$((${#urls[@]} * ${#params[@]}))
+            COMBINATIONS_PER_CHUNK=$((TOTAL_COMBINATIONS / 6 + 1))
+            START_COMBINATION=$((((${{ matrix.chunk }} - 1) * COMBINATIONS_PER_CHUNK) + 1))
+            END_COMBINATION=$((${{ matrix.chunk }} * COMBINATIONS_PER_CHUNK))
+
+            combination_count=0
+            for url in "${urls[@]}"; do
+              for param in "${params[@]}"; do
+                ((combination_count++))
+                if [[ $combination_count -ge $START_COMBINATION ]] && [[ $combination_count -le $END_COMBINATION ]]; then
+                  # Generate single parameter URL
+                  if [[ "$url" == *"?${param}="* ]]; then
+                    echo "$url" | sed "s/${param}=[^&]*/${param}=KXSS/" >> kxss-urls-${{ matrix.chunk }}.txt
+                  elif [[ "$url" == *\?* ]]; then
+                    echo "${url}&${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
+                  else
+                    echo "${url}?${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
+                  fi
+                fi
+              done
+            done
+          fi
+
+          # Remove duplicates and run kxss
+          sort -u kxss-urls-${{ matrix.chunk }}.txt > kxss-urls-final-${{ matrix.chunk }}.txt
+
+          if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
+            echo "Running kxss on chunk ${{ matrix.chunk }} with $(wc -l < kxss-urls-final-${{ matrix.chunk }}.txt) URLs"
+            timeout 300 kxss < kxss-urls-final-${{ matrix.chunk }}.txt > kxss-results-${{ matrix.chunk }}/kxss.txt || true
+            
+            KXSS_COUNT=$(wc -l < kxss-results-${{ matrix.chunk }}/kxss.txt)
+            echo "kxss chunk ${{ matrix.chunk }} processed $KXSS_COUNT lines"
+          else
+            touch kxss-results-${{ matrix.chunk }}/kxss.txt
+          fi
+
+      - name: Upload kxss results
+        uses: actions/upload-artifact@v4
+        with:
+          name: kxss-results-${{ matrix.chunk }}
+          path: kxss-results-${{ matrix.chunk }}/
+
+  final-summary:
+    needs: [x8-scan, kxss-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download URL collection results
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: url-collection-results
+          path: url-collection-results/
+
+      - name: Download all x8 results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: x8-results-*
+          merge-multiple: true
+
+      - name: Download all kxss results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kxss-results-*
+          merge-multiple: true
+
+      - name: Generate final summary
+        run: |
+          # Read domain
+          DOMAIN=$(cat url-collection-results/domain.txt)
+          HEADERS=$(cat url-collection-results/headers.txt)
+
+          # Combine all results
+          find . -name "x8-results-*" -type d -exec cat {}/*.txt \; > all-x8-reflections.txt || true
+          find . -name "kxss-results-*" -type d -exec cat {}/*.txt \; > all-kxss-reflections.txt || true
+
+          # Parse kxss output exactly like main.sh
+          awk '
+          /^URL: .* Param: .* Unfiltered: / {
+            url_start = index($0, "URL: ") + 5
+            param_pos = index($0, " Param: ")
+            url = substr($0, url_start, param_pos - url_start)
+
+            param_start = param_pos + 8
+            unfilt_pos = index($0, " Unfiltered: ")
+            param = substr($0, param_start, unfilt_pos - param_start)
+
+            unfilt_start = unfilt_pos + 13
+            unfiltered = substr($0, unfilt_start)
+
+            if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
+              print url " | " param " | Unfiltered: " unfiltered
+            }
+          }
+          ' all-kxss-reflections.txt > kxss-reflected-pairs.txt
+
+          # Count functions
+          count_or_zero(){
+            [[ -f "$1" ]] && wc -l < "$1" || echo 0
+          }
+
+          # Generate summary
+          ALLURLS_COUNT=$(count_or_zero url-collection-results/all-clean-urls.txt)
+          STATIC_COUNT=$(grep -iv "?" url-collection-results/all-clean-urls.txt 2>/dev/null | wc -l || echo 0)
+          DYNAMIC_COUNT=$(count_or_zero url-collection-results/dynamic-urls.txt)
+          HTTPX_COUNT=$(count_or_zero url-collection-results/all-alive-urls.txt)
+          PARAMS_COUNT=$(count_or_zero url-collection-results/params.txt)
+          X8_COUNT=$(count_or_zero all-x8-reflections.txt)
+          KXSS_COUNT=$(count_or_zero all-kxss-reflections.txt)
+          REFLECTED_COUNT=$(count_or_zero kxss-reflected-pairs.txt)
+
+          # Create final summary
+          mkdir -p final-results
+          
+          echo "============ Recon Summary for $DOMAIN ============" | tee final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "All unique URLs" "$ALLURLS_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Static URLs" "$STATIC_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Dynamic URLs" "$DYNAMIC_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Unique URL params" "$PARAMS_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "httpx (alive URLs)" "$HTTPX_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "x8 reflections lines" "$X8_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "kxss scan lines" "$KXSS_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Reflected pairs" "$REFLECTED_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
+          if [[ -n "$HEADERS" ]]; then
+            printf "%-22s: %s
+" "Headers used" "$HEADERS" | tee -a final-results/FINAL_SUMMARY.txt
+          fi
+          echo "==================================================" | tee -a final-results/FINAL_SUMMARY.txt
+
+          # Show reflected pairs
+          if [[ -s "kxss-reflected-pairs.txt" ]]; then
+            echo "" | tee -a final-results/FINAL_SUMMARY.txt
+            echo "[*] First 5 reflected pairs:" | tee -a final-results/FINAL_SUMMARY.txt
+            head -5 "kxss-reflected-pairs.txt" | tee -a final-results/FINAL_SUMMARY.txt
+          else
+            echo "" | tee -a final-results/FINAL_SUMMARY.txt
+            echo "[!] No reflected pairs found." | tee -a final-results/FINAL_SUMMARY.txt
+          fi
+
+          # Health check
+          if grep -q "1.bigdav.ir" "kxss-reflected-pairs.txt"; then
+            echo "[✓] Health check passed." | tee -a final-results/FINAL_SUMMARY.txt
+          else
+            echo "[✗] Health check failed." | tee -a final-results/FINAL_SUMMARY.txt
+          fi
+
+          # Copy all results
+          cp all-x8-reflections.txt final-results/ || true
+          cp all-kxss-reflections.txt final-results/ || true
+          cp kxss-reflected-pairs.txt final-results/ || true
+          cp url-collection-results/all-alive-urls.txt final-results/ || true
+          cp url-collection-results/dynamic-urls.txt final-results/ || true
+          cp url-collection-results/static-urls.txt final-results/ || true
+          cp url-collection-results/all-clean-urls.txt final-results/all-raw-urls.txt || true
+          cp url-collection-results/params.txt final-results/ || true
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-RESULTS-${{ env.DOMAIN || github.run_number }}
+          path: final-results/
