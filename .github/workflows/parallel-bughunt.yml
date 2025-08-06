@@ -621,6 +621,7 @@ jobs:
 " "Headers used" "${{ inputs.headers }}"
           fi
           echo "=================================================="
+
           
           # Show reflected pairs exactly like main.sh
           if [[ -s "kxss-reflected-pairs.txt" ]]; then
@@ -670,7 +671,8 @@ jobs:
 " "Headers used" "${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
           fi
           echo "==================================================" >> final-results/FINAL_SUMMARY.txt
-          
+
+
       - name: Upload final results
         uses: actions/upload-artifact@v4
         with:
