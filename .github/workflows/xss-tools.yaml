@@ -1,7 +1,7 @@
-name: "XSS Tools Execution"
+name: XSS Tools Execution
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Keep this for manual triggering if needed
     inputs:
       domain:
         description: 'Target domain'
@@ -10,6 +10,11 @@ on:
       headers:
         description: 'Custom headers (optional)'
         required: false
+  workflow_run: # Trigger this workflow when 'Parallel Bug Hunt - Part 1' completes
+    workflows:
+      - "Parallel Bug Hunt - Part 1" # Name of the workflow to watch
+    types:
+      - completed # Only trigger when the other workflow is completed
 
 jobs:
   # Job 1: Run httpx on dynamic URLs (parallel chunks)
@@ -99,17 +104,16 @@ jobs:
               echo "Building from source failed. Creating a fallback script..."
             fi
           fi
-          # Corrected fallback script using simplified echo commands and proper chmod
+          # Create a fallback script using a simple echo command
           echo '#!/bin/bash' > /usr/local/bin/x8_fallback.sh
           echo 'echo "Simulating x8 functionality: URL="$1\" WORDLIST=\"$2""' >> /usr/local/bin/x8_fallback.sh
           echo 'echo "Error: Fallback script executed. Real x8 not found. Please check installation."' >> /usr/local/bin/x8_fallback.sh
           chmod +x /usr/local/bin/x8_fallback.sh
+
+          # If x8 is not installed, use the fallback script
           if ! command -v x8 >/dev/null 2>&1; then
-              echo "x8 not found, using fallback script via alias."
-              echo "alias x8='/usr/local/bin/x8_fallback.sh'" >> $GITHUB_ENV
-              export PATH=$PATH:/usr/local/bin
-          else
-            echo "x8 found in PATH."
+              echo "Using fallback x8 script."
+              alias x8='/usr/local/bin/x8_fallback.sh'
           fi
 
       - name: Combine httpx results and run x8
@@ -209,3 +213,10 @@ jobs:
           name: kxss-results-${{ matrix.chunk }}
           path: kxss-results-${{ matrix.chunk }}/
 
+      - name: Trigger the next workflow (XSS Summary)
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: XSS Summary # This should match the name in xss-summary.yaml
+          repo: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          inputs: '{"domain": "${{ inputs.domain }}", "headers": "${{ inputs.headers }}"}'
