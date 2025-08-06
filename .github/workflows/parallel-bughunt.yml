@@ -1,0 +1,23 @@
+name: Simple Run main.sh
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain (مثلا: m.romwe.com)'
+        required: true
+
+jobs:
+  run-once:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set script permissions
+        run: chmod +x main.sh
+
+      - name: Run bash script
+        run: |
+          ./main.sh ${{ github.event.inputs.domain }}
