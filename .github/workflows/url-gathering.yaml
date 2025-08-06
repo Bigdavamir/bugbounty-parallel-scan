@@ -1,14 +1,14 @@
-name: Parallel Bug Hunt - Part 1
+name: Parallel Bug Hunt - Part1
 
 on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Target domain (e.g. example.com)'
+        description: 'Target domain (e.g., example.com)'
         required: true
         type: string
       headers:
-        description: 'Custom headers (optional, e.g. "Cookie: session=abc123")'
+        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
         required: false
         type: string
         default: ''
@@ -324,12 +324,4 @@ jobs:
         with:
           name: input-parameters
           path: input-parameters/
-
-      - name: Trigger the next workflow (XSS Tools Execution)
-        uses: benc-uk/workflow-dispatch@v1
-        with:
-          workflow: XSS Tools Execution # This should match the name in xss-tools.yaml
-          repo: ${{ github.repository }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          inputs: '{"domain": "${{ inputs.domain }}", "headers": "${{ inputs.headers }}"}'
 
