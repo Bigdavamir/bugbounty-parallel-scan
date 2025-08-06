@@ -15,12 +15,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies (jq, moreutils, gzip, tar, unzip)
+      - name: Install dependencies (jq, moreutils)
         run: |
           sudo apt update
-          sudo apt install -y jq moreutils gzip tar unzip curl wget
+          sudo apt install -y jq moreutils
 
-      - name: Install Go
+      - name: Install Go (for kxss only)
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
@@ -28,47 +28,57 @@ jobs:
       - name: Install bugbounty tools (all from release)
         run: |
           set -e
-          
+
           BIN_DIR="/usr/local/bin"
-          
-          echo "Installing waybackurls..."
-          go install github.com/tomnomnom/waybackurls@latest
-          sudo cp ~/go/bin/waybackurls $BIN_DIR/
 
-          echo "Installing anew..."
-          go install github.com/tomnomnom/anew@latest
-          sudo cp ~/go/bin/anew $BIN_DIR/
+          # waybackurls
+          WAYBACK_VER=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/waybackurls/releases/download/${WAYBACK_VER}/waybackurls_linux_amd64" -o waybackurls
+          chmod +x waybackurls && sudo mv waybackurls $BIN_DIR/
 
-          echo "Installing unfurl..."
-          go install github.com/tomnomnom/unfurl@latest
-          sudo cp ~/go/bin/unfurl $BIN_DIR/
+          # anew
+          ANEW_VER=$(curl -s https://api.github.com/repos/tomnomnom/anew/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/anew/releases/download/${ANEW_VER}/anew_linux_amd64" -o anew
+          chmod +x anew && sudo mv anew $BIN_DIR/
 
-          echo "Installing kxss..."
+          # unfurl
+          UNFURL_VER=$(curl -s https://api.github.com/repos/tomnomnom/unfurl/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/unfurl/releases/download/${UNFURL_VER}/unfurl_linux_amd64" -o unfurl
+          chmod +x unfurl && sudo mv unfurl $BIN_DIR/
+
+          # kxss (using go install instead of release)
+          echo "Installing kxss from source..."
           go install github.com/tomnomnom/kxss@latest
           sudo cp ~/go/bin/kxss $BIN_DIR/
 
-          echo "Installing gau..."
-          go install github.com/lc/gau/v2/cmd/gau@latest
-          sudo cp ~/go/bin/gau $BIN_DIR/
+          # gau (keep the working version)
+          GAU_URL=$(curl -s https://api.github.com/repos/lc/gau/releases/latest | grep "browser_download_url.*linux_amd64" | grep -o 'https://[^"]*' | head -n1)
+          wget -q -O gau "$GAU_URL"
+          chmod +x gau && sudo mv gau $BIN_DIR/
 
-          echo "Installing httpx..."
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          sudo cp ~/go/bin/httpx $BIN_DIR/
+          # httpx (keep the working version)
+          HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.tar.gz" -o httpx.tar.gz
+          tar -xzf httpx.tar.gz httpx
+          sudo mv httpx $BIN_DIR/
+          rm -f httpx.tar.gz
 
-          echo "Installing x8..."
-          X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o /tmp/x8
-          chmod +x /tmp/x8 && sudo mv /tmp/x8 $BIN_DIR/
+          # x8
+          X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o x8
+          chmod +x x8 && sudo mv x8 $BIN_DIR/
+
+          sudo chmod -R +x $BIN_DIR/*
 
           # Verify installations
           echo "Verifying installations..."
-          waybackurls --help >/dev/null && echo "✓ waybackurls installed" || echo "✗ waybackurls failed"
-          anew --help >/dev/null && echo "✓ anew installed" || echo "✗ anew failed"
-          unfurl --help >/dev/null && echo "✓ unfurl installed" || echo "✗ unfurl failed"
-          kxss --help >/dev/null && echo "✓ kxss installed" || echo "✗ kxss failed"
-          gau --help >/dev/null && echo "✓ gau installed" || echo "✗ gau failed"
-          httpx --help >/dev/null && echo "✓ httpx installed" || echo "✗ httpx failed"
-          x8 --help >/dev/null && echo "✓ x8 installed" || echo "✗ x8 failed"
+          which waybackurls && echo "✓ waybackurls installed" || echo "✗ waybackurls failed"
+          which anew && echo "✓ anew installed" || echo "✗ anew failed"
+          which unfurl && echo "✓ unfurl installed" || echo "✗ unfurl failed"
+          which kxss && echo "✓ kxss installed" || echo "✗ kxss failed"
+          which gau && echo "✓ gau installed" || echo "✗ gau failed"
+          which httpx && echo "✓ httpx installed" || echo "✗ httpx failed"
+          which x8 && echo "✓ x8 installed" || echo "✗ x8 failed"
 
       - name: Make main.sh executable
         run: chmod +x main.sh
