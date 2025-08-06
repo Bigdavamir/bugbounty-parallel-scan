@@ -1,4 +1,4 @@
-name: Advanced Distributed BugHunt - Fixed YAML
+name: Advanced Distributed BugHunt - YAML Fixed
 
 on:
   workflow_dispatch:
@@ -262,14 +262,24 @@ jobs:
           grep -v '?' combined_results/all-clean-urls.txt > combined_results/static-urls.txt 2>/dev/null || touch combined_results/static-urls.txt
           grep '?' combined_results/all-clean-urls.txt > combined_results/dynamic-urls.txt 2>/dev/null || touch combined_results/dynamic-urls.txt
           
-          # Extract parameters
+          # Extract parameters using a temporary script
           if [ -s combined_results/all-clean-urls.txt ]; then
             if command -v unfurl >/dev/null 2>&1; then
               unfurl --unique keys < combined_results/all-clean-urls.txt | sort -u > combined_results/params.txt
             else
-              # Manual parameter extraction as fallback - FIXED SYNTAX
-              grep '?' combined_results/all-clean-urls.txt | sed 's/.*?//' | tr '&' '
-' | sed 's/=.*//' | sort -u > combined_results/params.txt
+              # Create a temporary script for parameter extraction
+              cat > param_extract.sh << 'SCRIPT'
+          #!/bin/bash
+          grep '?' "$1" | while IFS= read -r url; do
+            # Extract query string after ?
+            query="${url#*\?}"
+            # Split by & and extract parameter names
+            echo "$query" | sed 's/&/\n/g' | sed 's/=.*//' | grep -v '^$'
+          done | sort -u
+          SCRIPT
+              chmod +x param_extract.sh
+              ./param_extract.sh combined_results/all-clean-urls.txt > combined_results/params.txt
+              rm param_extract.sh
             fi
           else
             touch combined_results/params.txt
