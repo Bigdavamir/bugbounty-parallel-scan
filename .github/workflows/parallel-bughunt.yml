@@ -20,52 +20,48 @@ jobs:
           sudo apt update
           sudo apt install -y jq moreutils
 
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Install bugbounty tools
+      - name: Install bugbounty tools (all from release)
         run: |
           set -e
 
+          BIN_DIR="/usr/local/bin"
+
           # waybackurls
-          go install github.com/tomnomnom/waybackurls@latest
-          cp ~/go/bin/waybackurls /usr/local/bin/
+          WAYBACK_VER=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/waybackurls/releases/download/${WAYBACK_VER}/waybackurls_linux_amd64" -o waybackurls
+          chmod +x waybackurls && sudo mv waybackurls $BIN_DIR/
 
           # anew
-          go install github.com/tomnomnom/anew@latest
-          cp ~/go/bin/anew /usr/local/bin/
+          ANEW_VER=$(curl -s https://api.github.com/repos/tomnomnom/anew/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/anew/releases/download/${ANEW_VER}/anew_linux_amd64" -o anew
+          chmod +x anew && sudo mv anew $BIN_DIR/
 
           # unfurl
-          go install github.com/tomnomnom/unfurl@latest
-          cp ~/go/bin/unfurl /usr/local/bin/
-
-          # gau (binary release)
-          echo "==> Resolving gau download URL…"
-          GAU_URL=$(curl -s https://api.github.com/repos/lc/gau/releases/latest \
-            | grep "browser_download_url.*linux_amd64" \
-            | grep -o 'https://[^"]*' \
-            | head -n1)
-          echo "Downloading gau from: $GAU_URL"
-          wget -q -O gau "$GAU_URL"
-          chmod +x gau
-          sudo mv gau /usr/local/bin/gau
-
-          # httpx
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          cp ~/go/bin/httpx /usr/local/bin/
+          UNFURL_VER=$(curl -s https://api.github.com/repos/tomnomnom/unfurl/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/unfurl/releases/download/${UNFURL_VER}/unfurl_linux_amd64" -o unfurl
+          chmod +x unfurl && sudo mv unfurl $BIN_DIR/
 
           # kxss
-          go install github.com/tomnomnom/kxss@latest
-          cp ~/go/bin/kxss /usr/local/bin/
+          KXSS_VER=$(curl -s https://api.github.com/repos/tomnomnom/kxss/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/tomnomnom/kxss/releases/download/${KXSS_VER}/kxss_linux_amd64" -o kxss
+          chmod +x kxss && sudo mv kxss $BIN_DIR/
+
+          # gau
+          GAU_URL=$(curl -s https://api.github.com/repos/lc/gau/releases/latest | grep "browser_download_url.*linux_amd64" | grep -o 'https://[^"]*' | head -n1)
+          wget -q -O gau "$GAU_URL"
+          chmod +x gau && sudo mv gau $BIN_DIR/
+
+          # httpx
+          HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.zip" -o httpx.zip
+          unzip -o httpx.zip -d . && sudo mv httpx $BIN_DIR/ && rm -f httpx.zip
 
           # x8
-          go install github.com/Sh1Yo/x8/cmd/x8@latest
-          cp ~/go/bin/x8 /usr/local/bin/
+          X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -L "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o x8
+          chmod +x x8 && sudo mv x8 $BIN_DIR/
 
-          # Fix PATH in environment (useful for custom steps)
-          echo "/usr/local/bin" >> $GITHUB_PATH
+          sudo chmod -R +x $BIN_DIR/*
 
       - name: Make main.sh executable
         run: chmod +x main.sh
