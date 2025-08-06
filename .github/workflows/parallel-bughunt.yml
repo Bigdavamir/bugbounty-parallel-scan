@@ -620,7 +620,6 @@ jobs:
 " "Headers used" "${{ inputs.headers }}"
           fi
           echo "=================================================="
-
           
           # Show reflected pairs exactly like main.sh
           if [[ -s "kxss-reflected-pairs.txt" ]]; then
