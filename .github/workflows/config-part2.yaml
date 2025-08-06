@@ -127,35 +127,34 @@ jobs:
             fi
           fi
 
-          # Method 4: Create a fallback script
-          echo '#!/bin/bash
+          # Method 4: Create a fallback script using heredoc
+          cat <<EOF > /usr/local/bin/x8_fallback.sh
+#!/bin/bash
 # Fallback x8 script that simulates basic x8 functionality
 # This script is used when all installation methods fail
-' > /usr/local/bin/x8_fallback.sh
 
-          echo '
 # Parse arguments
 URL=""
 WORDLIST=""
 METHODS="GET"
 HEADERS=""
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
+while [[ \$# -gt 0 ]]; do
+  case \$1 in
     -u|--url)
-      URL="$2"
+      URL="\$2"
       shift 2
       ;;
     -w|--wordlist)
-      WORDLIST="$2"
+      WORDLIST="\$2"
       shift 2
       ;;
     -X)
-      METHODS="$2"
+      METHODS="\$2"
       shift 2
       ;;
     -H|--header)
-      HEADERS="$HEADERS -H \"$2""
+      HEADERS="\$HEADERS -H \"\$2""
       shift 2
       ;;
     *)
@@ -165,55 +164,54 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Basic validation
-if [[ -z "$URL" || -z "$WORDLIST" ]]; then
+if [[ -z "\$URL" || -z "\$WORDLIST" ]]; then
   echo "Error: URL and WORDLIST are required"
   exit 1
 fi
 
 # Function to test a parameter
 test_param() {
-  local url="$1"
-  local param="$2"
-  local method="$3"
+  local url="\$1"
+  local param="\$2"
+  local method="\$3"
 
   # Skip if URL already has this parameter
-  if [[ "$url" == *"?${param}="* || "$url" == *"&${param}="* ]]; then
+  if [[ "\$url" == *"?\${param}="* || "\$url" == *"&\${param}="* ]]; then
     return
   fi
 
   # Add parameter to URL
   local test_url
-  if [[ "$url" == *\?* ]]; then
-    test_url="${url}&${param}=TEST_VALUE"
+  if [[ "\$url" == *\?* ]]; then
+    test_url="\${url}&\${param}=TEST_VALUE"
   else
-    test_url="${url}?${param}=TEST_VALUE"
+    test_url="\${url}?\${param}=TEST_VALUE"
   fi
 
   # Simple test for reflection
-  if [[ "$method" == "GET" ]]; then
-    result=$(curl -s "$test_url" | grep -o "TEST_VALUE" || echo "")
-    if [[ -n "$result" ]]; then
-      echo "$test_url | $param | Reflected: TEST_VALUE"
+  if [[ "\$method" == "GET" ]]; then
+    result=\$(curl -s "\$test_url" | grep -o "TEST_VALUE" || echo "")
+    if [[ -n "\$result" ]]; then
+      echo "\$test_url | \$param | Reflected: TEST_VALUE"
     fi
   fi
 }
 
 # Read wordlist and test each parameter
-if [[ -f "$WORDLIST" ]]; then
+if [[ -f "\$WORDLIST" ]]; then
   while IFS= read -r param; do
-    for method in $(echo "$METHODS" | tr " " "
+    for method in \$(echo "\$METHODS" | tr " " "
 "); do
-      test_param "$URL" "$param" "$method"
+      test_param "\$URL" "\$param" "\$method"
     done
-  done < "$WORDLIST"
+  done < "\$WORDLIST"
 else
-  echo "Error: Wordlist file not found: $WORDLIST"
+  echo "Error: Wordlist file not found: \$WORDLIST"
   exit 1
 fi
-' >> /usr/local/bin/x8_fallback.sh
-
+EOF
           chmod +x /usr/local/bin/x8_fallback.sh
-          # اگر x8 نصب نشد، از اسکریپت fallback استفاده کن
+          # If x8 is not installed, use the fallback script
           if ! command -v x8 >/dev/null 2>&1; then
               echo "Using fallback x8 script."
               alias x8='/usr/local/bin/x8_fallback.sh'
