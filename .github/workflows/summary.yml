@@ -1,0 +1,94 @@
+name: 3-Final Summary
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain'
+        required: true
+        type: string
+      run_id:
+        description: 'Original workflow run ID'
+        required: true
+        type: string
+
+jobs:
+  generate-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-${{ inputs.run_id }}"
+          merge-multiple: true
+
+      - name: Generate comprehensive summary
+        run: |
+          DOMAIN="${{ inputs.domain }}"
+          
+          echo "================================" > FINAL_SUMMARY.txt
+          echo "🎯 XSS BUG BOUNTY SCAN RESULTS" >> FINAL_SUMMARY.txt
+          echo "================================" >> FINAL_SUMMARY.txt
+          echo "Target Domain: $DOMAIN" >> FINAL_SUMMARY.txt
+          echo "Scan Date: $(date '+%Y-%m-%d %H:%M:%S UTC')" >> FINAL_SUMMARY.txt
+          echo "Run ID: ${{ inputs.run_id }}" >> FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # Count results
+          ALIVE_COUNT=$(wc -l < all-alive-urls.txt 2>/dev/null || echo 0)
+          PARAMS_COUNT=$(wc -l < params.txt 2>/dev/null || echo 0)
+          X8_COUNT=$(wc -l < all-x8-reflections.txt 2>/dev/null || echo 0)
+          KXSS_COUNT=$(wc -l < all-kxss-reflections.txt 2>/dev/null || echo 0)
+          
+          echo "📊 SCAN STATISTICS:" >> FINAL_SUMMARY.txt
+          echo "- Alive URLs found: $ALIVE_COUNT" >> FINAL_SUMMARY.txt
+          echo "- Unique parameters: $PARAMS_COUNT" >> FINAL_SUMMARY.txt
+          echo "- X8 reflections: $X8_COUNT" >> FINAL_SUMMARY.txt
+          echo "- KXSS reflections: $KXSS_COUNT" >> FINAL_SUMMARY.txt
+          echo "" >> FINAL_SUMMARY.txt
+          
+          # Show results if found
+          if [[ $X8_COUNT -gt 0 ]]; then
+            echo "🔍 X8 REFLECTION FINDINGS:" >> FINAL_SUMMARY.txt
+            head -10 all-x8-reflections.txt >> FINAL_SUMMARY.txt
+            echo "" >> FINAL_SUMMARY.txt
+          fi
+          
+          if [[ $KXSS_COUNT -gt 0 ]]; then
+            echo "🚨 KXSS XSS FINDINGS:" >> FINAL_SUMMARY.txt
+            head -10 all-kxss-reflections.txt >> FINAL_SUMMARY.txt
+            echo "" >> FINAL_SUMMARY.txt
+          fi
+          
+          # Overall assessment
+          TOTAL_FINDINGS=$((X8_COUNT + KXSS_COUNT))
+          
+          echo "🎯 OVERALL ASSESSMENT:" >> FINAL_SUMMARY.txt
+          if [[ $TOTAL_FINDINGS -gt 0 ]]; then
+            echo "✅ SUCCESS: Found $TOTAL_FINDINGS potential XSS vectors!" >> FINAL_SUMMARY.txt
+            echo "🔥 Prioritize manual testing on findings above." >> FINAL_SUMMARY.txt
+          else
+            echo "❌ No obvious XSS reflections detected." >> FINAL_SUMMARY.txt
+            echo "💡 Consider manual testing with custom payloads." >> FINAL_SUMMARY.txt
+          fi
+          
+          echo "" >> FINAL_SUMMARY.txt
+          echo "================================" >> FINAL_SUMMARY.txt
+          
+          # Display summary
+          echo "📋 FINAL SCAN SUMMARY:"
+          cat FINAL_SUMMARY.txt
+
+      - name: Upload final summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-RESULTS-${{ inputs.domain }}-${{ inputs.run_id }}
+          retention-days: 30
+          path: |
+            FINAL_SUMMARY.txt
+            all-alive-urls.txt
+            all-x8-reflections.txt
+            all-kxss-reflections.txt
