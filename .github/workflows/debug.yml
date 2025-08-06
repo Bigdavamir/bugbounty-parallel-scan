@@ -9,28 +9,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install httpx
+      - name: Install httpx and fix PATH
         run: |
           echo "Installing httpx..."
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          echo "httpx installed at: $(which httpx)"
+          
+          # Fix PATH - add go bin to PATH
+          echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
+          export PATH=$PATH:$(go env GOPATH)/bin
+          
+          echo "Go PATH: $(go env GOPATH)"
+          echo "Current PATH: $PATH"
+          echo "httpx location: $(which httpx || echo 'not found in PATH')"
+          ls -la "$(go env GOPATH)/bin/" || echo "go bin directory not found"
       
       - name: Test httpx basic functionality
         run: |
+          # Make sure PATH is set
+          export PATH=$PATH:$(go env GOPATH)/bin
+          
           echo "=== httpx Version ==="
-          httpx -version
+          httpx -version || echo "httpx command failed"
           
           echo ""
           echo "=== Test 1: Simple working URL ==="
-          echo "http://httpbin.org/get" | httpx -verbose -timeout 15
+          echo "http://httpbin.org/get" | httpx -verbose -timeout 15 || echo "Test 1 failed"
           
           echo ""
           echo "=== Test 2: Your target domain ==="
-          echo "http://linkdin.com/" | httpx -verbose -timeout 15
+          echo "http://linkdin.com/" | httpx -verbose -timeout 15 || echo "Test 2 failed"
           
           echo ""
           echo "=== Test 3: Multiple test URLs ==="
-          cat << 'EOF' | httpx -verbose -timeout 10
+          cat << 'EOF' | httpx -verbose -timeout 10 || echo "Test 3 failed"
           http://httpbin.org/get
           http://linkdin.com/
           https://www.google.com/
@@ -39,27 +50,25 @@ jobs:
       
       - name: Test httpx with different flags
         run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          
           echo "=== Testing different httpx configurations ==="
           
           echo ""
           echo "1. Basic silent mode:"
-          echo "http://linkdin.com/" | httpx -silent
+          echo "http://linkdin.com/" | httpx -silent || echo "Silent mode failed"
           
           echo ""
           echo "2. With status codes:"
-          echo "http://linkdin.com/" | httpx -silent -status-code
+          echo "http://linkdin.com/" | httpx -silent -status-code || echo "Status code test failed"
           
           echo ""
           echo "3. With follow redirects:"
-          echo "http://linkdin.com/" | httpx -silent -status-code -follow-redirects
+          echo "http://linkdin.com/" | httpx -silent -status-code -follow-redirects || echo "Follow redirects failed"
           
           echo ""
-          echo "4. With tech detection:"
-          echo "http://linkdin.com/" | httpx -silent -status-code -tech-detect
-          
-          echo ""
-          echo "5. Minimal settings:"
-          echo "http://linkdin.com/" | httpx -silent -threads 1 -rate-limit 1 -timeout 30
+          echo "4. Minimal settings:"
+          echo "http://linkdin.com/" | httpx -silent -threads 1 -rate-limit 1 -timeout 30 || echo "Minimal settings failed"
       
       - name: Compare with curl
         run: |
@@ -70,24 +79,19 @@ jobs:
           curl -I -L -m 15 "http://linkdin.com/" 2>&1 || echo "curl failed"
           
           echo ""
-          echo "--- httpx result for linkdin.com ---"  
+          echo "--- httpx result for linkdin.com ---"
+          export PATH=$PATH:$(go env GOPATH)/bin  
           echo "http://linkdin.com/" | httpx -verbose -follow-redirects -timeout 15 2>&1 || echo "httpx failed"
-          
-          echo ""
-          echo "--- Testing with HTTPS ---"
-          curl -I -L -m 15 "https://linkdin.com/" 2>&1 || echo "HTTPS curl failed"
-          echo "https://linkdin.com/" | httpx -verbose -timeout 15 2>&1 || echo "HTTPS httpx failed"
       
-      - name: Test with sample of your URLs
+      - name: Test with sample URLs
         run: |
+          export PATH=$PATH:$(go env GOPATH)/bin
+          
           echo "=== Testing with your actual URLs ==="
           
           cat << 'EOF' > test-urls.txt
           http://linkdin.com/
           http://linkdin.com/favicon.ico
-          http://blog.linkdin.com:80/
-          https://www.linkdin.com/login
-          http://linkdin.com:80/answers
           EOF
           
           echo "URLs to test:"
@@ -95,24 +99,24 @@ jobs:
           
           echo ""
           echo "--- httpx results ---"
-          cat test-urls.txt | httpx -verbose -timeout 20 -retries 2
+          cat test-urls.txt | httpx -verbose -timeout 20 -retries 2 || echo "httpx batch test failed"
           
           echo ""
           echo "--- httpx silent results ---"
-          cat test-urls.txt | httpx -silent -status-code -timeout 20
+          cat test-urls.txt | httpx -silent -status-code -timeout 20 || echo "httpx silent batch failed"
       
-      - name: Environment and dependencies check
+      - name: Debug PATH and environment
         run: |
-          echo "=== Environment Check ==="
+          echo "=== Final Environment Check ==="
           echo "Go version: $(go version)"
-          echo "httpx path: $(which httpx)"
-          echo "httpx permissions: $(ls -la $(which httpx))"
+          echo "GOPATH: $(go env GOPATH)"
+          echo "Current PATH: $PATH"
           
           echo ""
-          echo "=== Network check ==="
-          ping -c 3 8.8.8.8
-          nslookup linkdin.com
+          echo "=== Go bin directory contents ==="
+          ls -la "$(go env GOPATH)/bin/" 2>/dev/null || echo "go bin directory empty or not found"
           
           echo ""
-          echo "=== DNS and routing ==="
-          dig linkdin.com
+          echo "=== Network connectivity ==="
+          ping -c 2 8.8.8.8 || echo "ping failed"
+          nslookup linkdin.com || echo "DNS lookup failed"
