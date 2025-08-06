@@ -105,7 +105,7 @@ DYNAMIC_PASSIVE=$(mktemp)
 grep '?' "${DOMAIN}.passive" | sort -u > "$DYNAMIC_PASSIVE"
 split -l 150 "$DYNAMIC_PASSIVE" chunk_
 ls chunk_* | xargs -P 8 -I{} bash -c \
-  'httpx -silent -threads 100 -timeout 2 -retries 2 < "{}" > "{}.httpx"' || true
+  'httpx -silent -threads 100 -timeout 8 -retries 2 < "{}" > "{}.httpx"' || true
 
 for f in chunk_*.httpx; do
   [[ -f "$f" ]] && grep '?' "$f"
@@ -256,7 +256,7 @@ if command -v kxss &>/dev/null && [[ -s "${SCAN_DIR}/kxss_urls.txt" ]]; then
     echo "[$(date)] Starting kxss on chunk: $chunk_name" >> "'"${SCAN_DIR}/kxss_parallel.log"'"
 
     # Run kxss on this chunk
-    if timeout 300 kxss < "$chunk_file" > "$output_file" 2> "$log_file"; then
+    if timeout 600 kxss --timeout 15 < "$chunk_file" > "$output_file" 2> "$log_file"; then
       echo "[$(date)] Completed kxss on chunk: $chunk_name ($(wc -l < "$output_file") lines)" >> "'"${SCAN_DIR}/kxss_parallel.log"'"
     else
       echo "[$(date)] Failed/timeout kxss on chunk: $chunk_name" >> "'"${SCAN_DIR}/kxss_parallel.log"'"
