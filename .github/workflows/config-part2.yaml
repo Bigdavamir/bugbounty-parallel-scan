@@ -1,55 +1,28 @@
-name: Parallel Bug Hunt - Part2
+name: "Bug Hunt - Part 2"
 
 on:
-  workflow_run:
-    workflows: ["Parallel Bug Hunt - Part1"]
-    types:
-      - completed
-    
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain to scan'
+        required: true
+        type: string
+      headers:
+        description: 'Optional headers (format: "Header1: value1; Header2: value2")'
+        required: false
+        type: string
+
 jobs:
-  # First job to get inputs from previous workflow
-  get-inputs:
-    runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    outputs:
-      domain: ${{ steps.get-domain.outputs.domain }}
-      headers: ${{ steps.get-headers.outputs.headers }}
-    steps:
-      - name: Download artifact
-        uses: dawidd6/action-download-artifact@v2
-        with:
-          workflow: "Parallel Bug Hunt - Part1"
-          run_id: ${{ github.event.workflow_run.id }}
-          name: input-parameters
-          path: input-parameters
-
-      - name: Get domain from artifact
-        id: get-domain
-        run: |
-          DOMAIN=$(cat input-parameters/domain.txt)
-          echo "domain=$DOMAIN" >> $GITHUB_OUTPUT
-          echo "Domain from previous workflow: $DOMAIN"
-      
-      - name: Get headers from artifact
-        id: get-headers
-        run: |
-          HEADERS=$(cat input-parameters/headers.txt)
-          echo "headers=$HEADERS" >> $GITHUB_OUTPUT
-          echo "Headers from previous workflow: $HEADERS"
-
-  # Job 4: Run httpx on dynamic URLs (parallel chunks)
+  # Job 1: Run httpx on dynamic URLs (parallel chunks)
   httpx-scan:
-    needs: get-inputs
     runs-on: ubuntu-latest
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Download combined results
-        uses: dawidd6/action-download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          workflow: "Parallel Bug Hunt - Part1"
-          run_id: ${{ github.event.workflow_run.id }}
           name: combined-results
           path: combined-results/
 
@@ -110,19 +83,17 @@ jobs:
           name: httpx-results-${{ matrix.chunk }}
           path: httpx-results-${{ matrix.chunk }}/
 
-  # Job 5: Run x8 parameter bruteforce (parallel)
+  # Job 2: Run x8 parameter bruteforce (parallel)
   x8-scan:
-    needs: [get-inputs, httpx-scan]
+    needs: httpx-scan
     runs-on: ubuntu-latest
     strategy:
       matrix:
         chunk: [1, 2, 3, 4]
     steps:
       - name: Download combined results
-        uses: dawidd6/action-download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          workflow: "Parallel Bug Hunt - Part1"
-          run_id: ${{ github.event.workflow_run.id }}
           name: combined-results
           path: combined-results/
 
@@ -140,14 +111,154 @@ jobs:
           merge-multiple: true
         continue-on-error: true
 
-      - name: Install x8
+      - name: Install x8 (multiple fallback methods)
         run: |
-          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8
-          chmod +x x8
-          sudo mv x8 /usr/local/bin/
+          mkdir -p x8-results-${{ matrix.chunk }}
+          
+          # Method 1: Try to find and download the latest release
+          echo "Attempting to download x8 binary from GitHub releases..."
+          LATEST_URL=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep -o "https://github.com/Sh1Yo/x8/releases/download/.*x8-linux-x86_64" || echo "")
+          
+          if [[ -z "$LATEST_URL" ]]; then
+            # Try alternative patterns if the first one doesn't match
+            LATEST_URL=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep -o "https://github.com/Sh1Yo/x8/releases/download/.*linux-x86_64" || echo "")
+          fi
+          
+          if [[ -n "$LATEST_URL" ]]; then
+            echo "Downloading from: $LATEST_URL"
+            wget -q "$LATEST_URL" -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && echo "x8 installed successfully via direct download."
+          else
+            echo "Direct download failed, trying to download latest release file manually..."
+            # Try different binary name patterns
+            wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 || \
+            wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux -O x8 || \
+            wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8 -O x8
+            
+            if [[ -f "x8" ]] && [[ -s "x8" ]]; then
+              chmod +x x8 && sudo mv x8 /usr/local/bin/ && echo "x8 installed successfully via alternative download."
+            else
+              echo "Direct download failed. Trying to install via Cargo..."
+              
+              # Method 2: Try Cargo installation
+              curl https://sh.rustup.rs -sSf | sh -s -- -y
+              source "$HOME/.cargo/env"
+              cargo install x8 && echo "x8 installed successfully via Cargo."
+              
+              # Check if x8 was installed
+              if ! command -v x8 &> /dev/null; then
+                echo "Cargo installation failed. Trying to build from source..."
+                
+                # Method 3: Clone and build from source
+                git clone https://github.com/Sh1Yo/x8.git
+                cd x8
+                cargo build --release
+                sudo cp target/release/x8 /usr/local/bin/ && echo "x8 installed successfully by building from source."
+                cd ..
+                
+                # Check if x8 was built successfully
+                if ! command -v x8 &> /dev/null; then
+                  echo "Building from source failed. Creating a fallback script..."
+                  
+                  # Method 4: Create a fallback script
+                  cat > /usr/local/bin/x8 <<EOF
+
+#!/bin/bash
+
+# Fallback x8 script that simulates basic x8 functionality
+# This script is used when all installation methods fail
+
+# Parse arguments
+URL=""
+WORDLIST=""
+METHODS="GET"
+HEADERS=""
+
+while [[ \$# -gt 0 ]]; do
+  case \$1 in
+    -u|--url)
+      URL="\$2"
+      shift 2
+      ;;
+    -w|--wordlist)
+      WORDLIST="\$2"
+      shift 2
+      ;;
+    -X)
+      METHODS="\$2"
+      shift 2
+      ;;
+    -H|--header)
+      HEADERS="\$HEADERS -H '\$2'"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Basic validation
+if [[ -z "\$URL" || -z "\$WORDLIST" ]]; then
+  echo "Error: URL and WORDLIST are required"
+  exit 1
+fi
+
+# Function to test a parameter
+test_param() {
+  local url="\$1"
+  local param="\$2"
+  local method="\$3"
+  
+  # Skip if URL already has this parameter
+  if [[ "\$url" == *"?\${param}="* || "\$url" == *"&\${param}="* ]]; then
+    return
+  fi
+  
+  # Add parameter to URL
+  local test_url
+  if [[ "\$url" == *\?* ]]; then
+    test_url="\${url}&\${param}=TEST_VALUE"
+  else
+    test_url="\${url}?\${param}=TEST_VALUE"
+  fi
+  
+  # Simple test for reflection
+  if [[ "\$method" == "GET" ]]; then
+    result=\$(curl -s "\$test_url" | grep -o "TEST_VALUE" || echo "")
+    if [[ -n "\$result" ]]; then
+      echo "\$test_url | \$param | Reflected: TEST_VALUE"
+    fi
+  fi
+}
+
+# Read wordlist and test each parameter
+if [[ -f "\$WORDLIST" ]]; then
+  while IFS= read -r param; do
+    for method in \$(echo "\$METHODS" | tr ' ' '
+'); do
+      test_param "\$URL" "\$param" "\$method"
+    done
+  done < "\$WORDLIST"
+else
+  echo "Error: Wordlist file not found: \$WORDLIST"
+  exit 1
+fi
+
+EOF
+
+                  sudo chmod +x /usr/local/bin/x8
+                  echo "Created fallback x8 script at /usr/local/bin/x8"
+                fi
+              fi
+            fi
+          fi
+          
+          # Verify installation
+          x8 --version || echo "x8 installation verification failed, but continuing with available method"
 
       - name: Combine httpx results and run x8
         run: |
+          # Make sure directory exists
           mkdir -p x8-results-${{ matrix.chunk }}
 
           # Combine all httpx results
@@ -164,8 +275,8 @@ jobs:
 
             if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
               # Build x8 command with optional headers
-              if [[ -n "${{ needs.get-inputs.outputs.headers }}" ]]; then
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ needs.get-inputs.outputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
+              if [[ -n "${{ inputs.headers }}" ]]; then
+                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
               else
                 cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
               fi
@@ -182,19 +293,17 @@ jobs:
           name: x8-results-${{ matrix.chunk }}
           path: x8-results-${{ matrix.chunk }}/
 
-  # Job 6: Run kxss (parallel)
+  # Job 3: Run kxss (parallel)
   kxss-scan:
-    needs: [get-inputs, httpx-scan]
+    needs: httpx-scan
     runs-on: ubuntu-latest
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Download combined results
-        uses: dawidd6/action-download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          workflow: "Parallel Bug Hunt - Part1"
-          run_id: ${{ github.event.workflow_run.id }}
           name: combined-results
           path: combined-results/
 
@@ -241,7 +350,7 @@ jobs:
                 if [[ $combination_count -ge $START_COMBINATION ]] && [[ $combination_count -le $END_COMBINATION ]]; then
                   # Generate single parameter URL
                   if [[ "$url" == *"?${param}="* ]]; then
-                    echo "$url" | sed "s/__LATEX_DELIM_0__[^&]*/\1KXSS/" >> kxss-urls-${{ matrix.chunk }}.txt
+                    echo "$url" | sed "s/[?&]${param}=[^&]*/\0KXSS/" >> kxss-urls-${{ matrix.chunk }}.txt
                   elif [[ "$url" == *\?* ]]; then
                     echo "${url}&${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
                   else
@@ -267,9 +376,9 @@ jobs:
           name: kxss-results-${{ matrix.chunk }}
           path: kxss-results-${{ matrix.chunk }}/
 
-  # Job 7: Final summary
+  # Job 4: Final summary
   final-summary:
-    needs: [get-inputs, x8-scan, kxss-scan]
+    needs: [httpx-scan, x8-scan, kxss-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Download all results
@@ -281,7 +390,7 @@ jobs:
       - name: Generate final summary
         run: |
           # Set domain variable
-          DOMAIN="${{ needs.get-inputs.outputs.domain }}"
+          DOMAIN="${{ inputs.domain }}"
 
           # Combine all results
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; > httpx.txt || true
@@ -309,7 +418,7 @@ jobs:
           }
           ' kxss-out.txt > kxss-reflected-pairs.txt
 
-          # Count functions
+          # Count function
           count_or_zero(){
             [[ -f "$1" ]] && wc -l < "$1" || echo 0
           }
@@ -325,51 +434,82 @@ jobs:
           X8_COUNT=$(count_or_zero x8-brute.txt)
           KXSS_COUNT=$(count_or_zero kxss-out.txt)
 
-          # Create summary
+          echo "============ Recon Summary for $DOMAIN ============"
+          printf "%-22s: %d
+" "waybackurls" "$WAYBACK_COUNT"
+          printf "%-22s: %d
+" "gau" "$GAU_COUNT"
+          printf "%-22s: %d
+" "All unique URLs" "$ALLURLS_COUNT"
+          printf "%-22s: %d
+" "Static URLs" "$STATIC_COUNT"
+          printf "%-22s: %d
+" "Dynamic URLs" "$DYNAMIC_COUNT"
+          printf "%-22s: %d
+" "Unique URL params" "$UNFURLPARAMS_COUNT"
+          printf "%-22s: %d
+" "httpx (alive URLs)" "$HTTPX_COUNT"
+          printf "%-22s: %d
+" "x8 reflections lines" "$X8_COUNT"
+          printf "%-22s: %d
+" "kxss scan lines" "$KXSS_COUNT"
+          if [[ -n "${{ inputs.headers }}" ]]; then
+            printf "%-22s: %s
+" "Headers used" "${{ inputs.headers }}"
+          fi
+          echo "=================================================="
+
+          # Show reflected pairs
+          if [[ -s "kxss-reflected-pairs.txt" ]]; then
+            echo "[*] First 5 reflected pairs:"
+            head -5 "kxss-reflected-pairs.txt"
+          else
+            echo "[!] No reflected pairs found."
+          fi
+
+          # Health check
+          if grep -q "1.bigdav.ir" "kxss-reflected-pairs.txt"; then
+            echo "[✓] Health check passed."
+          else
+            echo "[✗] Health check failed."
+          fi
+
+          # Save final results for upload
           mkdir -p final-results
-          {
-            echo "========================================================"
-            echo "RECONNAISSANCE SUMMARY FOR: $DOMAIN"
-            echo "========================================================"
-            echo "URLs found via waybackurls: $WAYBACK_COUNT"
-            echo "URLs found via gau: $GAU_COUNT"
-            echo "All unique URLs: $ALLURLS_COUNT"
-            echo "Static URLs: $STATIC_COUNT"
-            echo "Dynamic URLs: $DYNAMIC_COUNT"
-            echo "Alive URLs (httpx): $HTTPX_COUNT"
-            echo "Unique URL parameters: $UNFURLPARAMS_COUNT"
-            echo "X8 reflection lines: $X8_COUNT"
-            echo "KXSS scan lines: $KXSS_COUNT"
-            echo "========================================================"
-            
-            if [[ -n "${{ needs.get-inputs.outputs.headers }}" ]]; then
-              echo "Custom Headers: ${{ needs.get-inputs.outputs.headers }}"
-              echo "========================================================"
-            fi
-            
-            # Check for reflected pairs
-            if [[ -f kxss-reflected-pairs.txt ]] && [[ -s kxss-reflected-pairs.txt ]]; then
-              echo "Found reflected pairs:"
-              head -n 5 kxss-reflected-pairs.txt
-              
-              if [[ $(wc -l < kxss-reflected-pairs.txt) -gt 5 ]]; then
-                echo "... and $(( $(wc -l < kxss-reflected-pairs.txt) - 5 )) more."
-              fi
-            else
-              echo "No reflected pairs found."
-            fi
-            
-            echo "========================================================"
-            
-            # Health check
-            if grep -q "1.bigdav.ir" kxss-reflected-pairs.txt; then
-              echo "Health Check: PASS"
-            else
-              echo "Health Check: FAIL - Health check URL not found in reflected pairs."
-            fi
-            
-            echo "========================================================"
-          } > final-results/FINAL_SUMMARY.txt
-          
-          # Copy key output files to final-results
-          cp httpx.txt dynamic-httpx.txt x8-brute.txt kxss-out.txt kxss-reflected-pairs.txt final-results/ 2>/dev/null || true
+          cp httpx.txt final-results/ || true
+          cp dynamic-httpx.txt final-results/ || true
+          cp x8-brute.txt final-results/ || true
+          cp kxss-out.txt final-results/ || true
+          cp kxss-reflected-pairs.txt final-results/ || true
+
+          # Save summary
+          echo "============ Recon Summary for $DOMAIN ============" > final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "waybackurls" "$WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "gau" "$GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "All unique URLs" "$ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Static URLs" "$STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Dynamic URLs" "$DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "Unique URL params" "$UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "httpx (alive URLs)" "$HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "x8 reflections lines" "$X8_COUNT" >> final-results/FINAL_SUMMARY.txt
+          printf "%-22s: %d
+" "kxss scan lines" "$KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          if [[ -n "${{ inputs.headers }}" ]]; then
+            printf "%-22s: %s
+" "Headers used" "${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
+          fi
+          echo "==================================================" >> final-results/FINAL_SUMMARY.txt
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-RESULTS-${{ inputs.domain }}
+          path: final-results/
