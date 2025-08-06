@@ -22,7 +22,7 @@ jobs:
         chunk: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Restore combined results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: combined-results/
           key: combined-results-${{ inputs.run_id }}
@@ -66,7 +66,7 @@ jobs:
           echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
 
       - name: Cache httpx results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: httpx-results-${{ matrix.chunk }}/
           key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
@@ -80,7 +80,7 @@ jobs:
         chunk: [1, 2, 3, 4]
     steps:
       - name: Restore combined results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: combined-results/
           key: combined-results-${{ inputs.run_id }}
@@ -88,7 +88,7 @@ jobs:
             combined-results-
 
       - name: Restore all httpx results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: httpx-results/
           key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
@@ -143,7 +143,7 @@ jobs:
           fi
 
       - name: Cache x8 results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: x8-results-${{ matrix.chunk }}/
           key: x8-results-${{ matrix.chunk }}-${{ inputs.run_id }}
@@ -157,7 +157,7 @@ jobs:
         chunk: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Restore combined results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: combined-results/
           key: combined-results-${{ inputs.run_id }}
@@ -165,7 +165,7 @@ jobs:
             combined-results-
 
       - name: Restore all httpx results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: httpx-results/
           key: httpx-results-*-${{ inputs.run_id }}
@@ -224,7 +224,7 @@ jobs:
           echo "kxss found $KXSS_COUNT results for chunk ${{ matrix.chunk }}"
 
       - name: Cache kxss results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: kxss-results-${{ matrix.chunk }}/
           key: kxss-results-${{ matrix.chunk }}-${{ inputs.run_id }}
