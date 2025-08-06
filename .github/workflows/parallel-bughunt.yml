@@ -92,7 +92,7 @@ jobs:
           which waybackurls || echo "waybackurls not in PATH"
           
           # Add go bin to PATH if needed
-          export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
+          export PATH="$HOME/go/bin:$PATH"
           
           echo "Running waybackurls for: $DOMAIN"
           
