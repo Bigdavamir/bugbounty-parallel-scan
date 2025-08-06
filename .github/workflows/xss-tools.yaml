@@ -1,0 +1,230 @@
+name: XSS Tools Execution
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        required: true
+        type: string
+      headers:
+        required: false
+        type: string
+      run_id:
+        required: true
+        type: string
+
+jobs:
+  # Job 1: Run httpx on dynamic URLs (parallel chunks)
+  httpx-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - name: Restore combined results
+        uses: actions/cache@v3
+        with:
+          path: combined-results/
+          key: combined-results-${{ inputs.run_id }}
+          restore-keys: |
+            combined-results-
+
+      - name: Install httpx with PATH fix
+        run: |
+          echo "Installing httpx..."
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
+          export PATH=$PATH:$(go env GOPATH)/bin
+          echo "Go PATH: $(go env GOPATH)"
+          echo "Current PATH: $PATH"
+          echo "httpx location: $(which httpx || echo 'not found in PATH')"
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Run httpx on chunk
+        run: |
+          mkdir -p httpx-results-${{ matrix.chunk }}
+          export PATH=$PATH:$(go env GOPATH)/bin
+          if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
+            TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 8 + 1))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+            sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
+            if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
+              echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < chunk-${{ matrix.chunk }}.txt) URLs"
+              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
+                echo "httpx failed for chunk ${{ matrix.chunk }}, using input URLs as fallback"
+                cp chunk-${{ matrix.chunk }}.txt httpx-results-${{ matrix.chunk }}/httpx.txt
+              }
+            else
+              touch httpx-results-${{ matrix.chunk }}/httpx.txt
+            fi
+          else
+            touch httpx-results-${{ matrix.chunk }}/httpx.txt
+          fi
+          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
+          echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
+
+      - name: Cache httpx results
+        uses: actions/cache@v3
+        with:
+          path: httpx-results-${{ matrix.chunk }}/
+          key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
+
+  # Job 2: Run x8 parameter bruteforce (parallel)
+  x8-scan:
+    needs: httpx-scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4]
+    steps:
+      - name: Restore combined results
+        uses: actions/cache@v3
+        with:
+          path: combined-results/
+          key: combined-results-${{ inputs.run_id }}
+          restore-keys: |
+            combined-results-
+
+      - name: Restore all httpx results
+        uses: actions/cache@v3
+        with:
+          path: httpx-results/
+          key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
+          restore-keys: |
+            httpx-results-
+
+      - name: Install x8
+        run: |
+          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && command -v x8 && echo "x8 installed via direct download" && exit 0 || echo "Direct download failed, trying cargo..."
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          source "$HOME/.cargo/env"
+          cargo install x8 && echo "x8 installed via cargo" && exit 0 || echo "Cargo install failed, trying build from source..."
+          if command -v go >/dev/null 2>&1; then
+            if ! command -v x8 >/dev/null 2>&1; then
+              echo "Building from source failed. Creating a fallback script..."
+            fi
+          fi
+          # Corrected fallback script using simplified echo commands and proper chmod
+          echo '#!/bin/bash' > /usr/local/bin/x8_fallback.sh
+          echo 'echo "Simulating x8 functionality: URL="$1\" WORDLIST=\"$2""' >> /usr/local/bin/x8_fallback.sh
+          echo 'echo "Error: Fallback script executed. Real x8 not found. Please check installation."' >> /usr/local/bin/x8_fallback.sh
+          chmod +x /usr/local/bin/x8_fallback.sh
+          if ! command -v x8 >/dev/null 2>&1; then
+              echo "x8 not found, using fallback script via alias."
+              echo "alias x8='/usr/local/bin/x8_fallback.sh'" >> $GITHUB_ENV
+              export PATH=$PATH:/usr/local/bin
+          else
+            echo "x8 found in PATH."
+          fi
+
+      - name: Combine httpx results and run x8
+        run: |
+          mkdir -p x8-results-${{ matrix.chunk }}
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
+          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
+            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
+              if [[ -n "${{ inputs.headers }}" ]]; then
+                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
+              else
+                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
+              fi
+            else
+              touch x8-results-${{ matrix.chunk }}/x8.txt
+            fi
+          else
+            touch x8-results-${{ matrix.chunk }}/x8.txt
+          fi
+
+      - name: Cache x8 results
+        uses: actions/cache@v3
+        with:
+          path: x8-results-${{ matrix.chunk }}/
+          key: x8-results-${{ matrix.chunk }}-${{ inputs.run_id }}
+
+  # Job 3: Run kxss (parallel)
+  kxss-scan:
+    needs: httpx-scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Restore combined results
+        uses: actions/cache@v3
+        with:
+          path: combined-results/
+          key: combined-results-${{ inputs.run_id }}
+          restore-keys: |
+            combined-results-
+
+      - name: Restore all httpx results
+        uses: actions/cache@v3
+        with:
+          path: httpx-results/
+          key: httpx-results-*-${{ inputs.run_id }}
+          restore-keys: |
+            httpx-results-
+
+      - name: Install kxss
+        run: |
+          go install github.com/Emoe/kxss@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Generate kxss URLs and run scan
+        run: |
+          mkdir -p kxss-results-${{ matrix.chunk }}
+          export PATH=$PATH:$(go env GOPATH)/bin
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
+
+          # Prepare URLs for kxss with parameters
+          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 6 + 1))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+
+            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > kxss-urls-${{ matrix.chunk }}.txt
+
+            if [[ -s "kxss-urls-${{ matrix.chunk }}.txt" ]]; then
+              echo "Running kxss for chunk ${{ matrix.chunk }}..."
+              # Prepare input for kxss - combine URL with parameter
+              cat kxss-urls-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 |
+              while IFS= read -r url; do
+                if [[ -f "combined-results/unfurl-params.txt" ]]; then
+                  while IFS= read -r param; do
+                    echo "$url?${param}=KXSS"
+                  done < combined-results/unfurl-params.txt
+                else
+                  echo "$url" # If no parameters found, just use the URL
+                fi
+              done | sort -u > kxss-urls-final-${{ matrix.chunk }}.txt
+
+              if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
+                cat kxss-urls-final-${{ matrix.chunk }}.txt | kxss -timeout 300 -threads 50 > kxss-results-${{ matrix.chunk }}/kxss-output.txt || {
+                  echo "kxss scan failed for chunk ${{ matrix.chunk }}"
+                  touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
+                }
+              else
+                touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
+              fi
+            else
+              touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
+            fi
+          else
+            touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
+          fi
+          KXSS_COUNT=$(wc -l < kxss-results-${{ matrix.chunk }}/kxss-output.txt)
+          echo "kxss found $KXSS_COUNT results for chunk ${{ matrix.chunk }}"
+
+      - name: Cache kxss results
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-${{ matrix.chunk }}/
+          key: kxss-results-${{ matrix.chunk }}-${{ inputs.run_id }}
