@@ -27,65 +27,18 @@ jobs:
 
       - name: Install waybackurls
         run: |
-          echo "Trying direct binary download..."
-          ARCH="linux-amd64"
-          LATEST=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest)
-          VERSION=$(echo "$LATEST" | jq -r '.tag_name')
-          echo "Found version: $VERSION"
-          URLS=(
-            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls-${ARCH}-${VERSION}.tgz"
-            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls_${ARCH}"
-            "https://github.com/tomnomnom/waybackurls/releases/download/${VERSION}/waybackurls_linux_amd64"
-          )
-          INSTALLED=false
-          for url in "${URLS[@]}"; do
-            echo "Trying: $url"
-            if wget -q "$url" -O waybackurls_download 2>/dev/null; then
-              echo "Downloaded successfully from: $url"
-              if file waybackurls_download | grep -q "gzip"; then
-                echo "Extracting tar.gz file..."
-                tar -xzf waybackurls_download
-                find . -name "waybackurls" -type f -executable | head -1 | xargs -I{} cp {} waybackurls_binary
-              else
-                echo "Using direct binary..."
-                cp waybackurls_download waybackurls_binary
-              fi
-              chmod +x waybackurls_binary
-              sudo mv waybackurls_binary /usr/local/bin/waybackurls
-              if waybackurls --help >/dev/null 2>&1 || waybackurls -h >/dev/null 2>&1; then
-                echo "waybackurls installed successfully"
-                INSTALLED=true
-                break
-              fi
-            fi
-          done
-          if [ "$INSTALLED" = false ]; then
-            echo "Binary installation failed, trying Go installation..."
-            sudo apt install -y golang-go
-            export PATH=$PATH:/usr/local/go/bin:~/go/bin
-            go install github.com/tomnomnom/waybackurls@latest
-            sudo cp ~/go/bin/waybackurls /usr/local/bin/ 2>/dev/null || echo "waybackurls available in ~/go/bin/"
-            export PATH="$HOME/go/bin:$PATH"
-          fi
+          sudo apt install -y golang-go
+          export PATH=$PATH:/usr/local/go/bin:~/go/bin
+          go install github.com/tomnomnom/waybackurls@latest
+          sudo cp ~/go/bin/waybackurls /usr/local/bin/ 2>/dev/null || echo "waybackurls available in ~/go/bin/"
+          export PATH="$HOME/go/bin:$PATH"
 
       - name: Run waybackurls
         run: |
           DOMAIN="${{ inputs.domain }}"
           mkdir -p passive-wayback
-          which waybackurls || echo "waybackurls not in PATH"
           export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
-          echo "Running waybackurls for: $DOMAIN"
-          if command -v waybackurls >/dev/null 2>&1; then
-            echo "$DOMAIN" | waybackurls > passive-wayback/waybackurls.txt 2>&1 || {
-              echo "waybackurls failed, creating empty file"
-              touch passive-wayback/waybackurls.txt
-            }
-          else
-            echo "waybackurls not found, creating empty file"
-            touch passive-wayback/waybackurls.txt
-          fi
-          WAYBACK_COUNT=$(wc -l < passive-wayback/waybackurls.txt)
-          echo "Waybackurls found $WAYBACK_COUNT URLs"
+          echo "$DOMAIN" | waybackurls > passive-wayback/waybackurls.txt 2>&1 || { touch passive-wayback/waybackurls.txt; }
           echo "https://${DOMAIN}/" >> passive-wayback/waybackurls.txt
           echo "https://www.${DOMAIN}/" >> passive-wayback/waybackurls.txt
           echo "https://${DOMAIN}/admin" >> passive-wayback/waybackurls.txt
@@ -106,12 +59,9 @@ jobs:
 
       - name: Install Go and gau
         run: |
-          sudo apt update
           sudo apt install -y golang-go curl
           export GOPATH=$HOME/go
           export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
-          echo "export PATH=\$PATH:/usr/local/go/bin:\$HOME/go/bin" >> ~/.bashrc
-          echo "Installing gau..."
           go install github.com/lc/gau/v2/cmd/gau@latest
           sudo cp $HOME/go/bin/gau /usr/local/bin/ 2>/dev/null || echo "gau available in ~/go/bin/"
           echo "$HOME/go/bin" >> $GITHUB_PATH
@@ -121,19 +71,7 @@ jobs:
           DOMAIN="${{ inputs.domain }}"
           mkdir -p passive-gau
           export PATH="$HOME/go/bin:/usr/local/bin:$PATH"
-          which gau || echo "gau not in standard PATH"
-          echo "Running gau for: $DOMAIN"
-          if command -v gau >/dev/null 2>&1; then
-            timeout 300 gau "$DOMAIN" --threads 3 --subs > passive-gau/gau.txt 2>&1 || {
-              echo "gau failed or timed out, checking partial results..."
-              touch passive-gau/gau.txt
-            }
-          else
-            echo "gau not found, creating empty file"
-            touch passive-gau/gau.txt
-          fi
-          GAU_COUNT=$(wc -l < passive-gau/gau.txt)
-          echo "GAU found $GAU_COUNT URLs"
+          timeout 300 gau "$DOMAIN" --threads 3 --subs > passive-gau/gau.txt 2>&1 || { touch passive-gau/gau.txt; }
           echo "https://${DOMAIN}/search?q=test" >> passive-gau/gau.txt
           echo "https://${DOMAIN}/page?id=1" >> passive-gau/gau.txt
           echo "https://api.${DOMAIN}/v1/users?limit=10" >> passive-gau/gau.txt
@@ -153,16 +91,14 @@ jobs:
         with:
           path: passive-wayback/
           key: wayback-results-${{ inputs.run_id }}
-          restore-keys: |
-            wayback-results-
+          restore-keys: wayback-results-
 
       - name: Restore gau results
         uses: actions/cache@v3
         with:
           path: passive-gau/
           key: gau-results-${{ inputs.run_id }}
-          restore-keys: |
-            gau-results-
+          restore-keys: gau-results-
 
       - name: Install tools
         run: |
@@ -182,15 +118,18 @@ jobs:
           echo "https://${{ inputs.domain }}/" > all-urls.tmp
           cat passive-wayback/waybackurls.txt >> all-urls.tmp || true
           cat passive-gau/gau.txt >> all-urls.tmp || true
-          cat >> all-urls.tmp << 'EOF'
-https://${{ inputs.domain }}/search?q=test&category=all
-https://${{ inputs.domain }}/login?redirect=%2Fdashboard
-https://${{ inputs.domain }}/api/users?id=1&format=json
-https://${{ inputs.domain }}/product?id=123&color=red
-https://www.${{ inputs.domain }}/page?ref=home&utm_source=google
-https://${{ inputs.domain }}/contact?subject=hello&name=test
-EOF
+
+          # Manual URLs (بدون heredoc)
+          echo "https://${{ inputs.domain }}/search?q=test&category=all" >> all-urls.tmp
+          echo "https://${{ inputs.domain }}/login?redirect=%2Fdashboard" >> all-urls.tmp
+          echo "https://${{ inputs.domain }}/api/users?id=1&format=json" >> all-urls.tmp
+          echo "https://${{ inputs.domain }}/product?id=123&color=red" >> all-urls.tmp
+          echo "https://www.${{ inputs.domain }}/page?ref=home&utm_source=google" >> all-urls.tmp
+          echo "https://${{ inputs.domain }}/contact?subject=hello&name=test" >> all-urls.tmp
+
           sort -u all-urls.tmp | grep -iEv "\.${EXTS}" | awk 'NF' > combined-results/all-urls.txt
+
+          # Unique params
           if command -v unfurl >/dev/null 2>&1; then
             unfurl --unique keys < combined-results/all-urls.txt | sort -u > combined-results/unfurl-params.txt
           else
@@ -199,32 +138,16 @@ EOF
               echo "$query" | sed 's/&/\n/g' | sed 's/=.*//' | grep -v '^$'
             done | sort -u > combined-results/unfurl-params.txt
           fi
-          if [ $(wc -l < combined-results/unfurl-params.txt) -lt 5 ]; then
-            cat >> combined-results/unfurl-params.txt << 'EOF'
-id
-q
-search
-query
-page
-limit
-offset
-sort
-filter
-category
-name
-email
-user
-redirect
-url
-callback
-ref
-source
-utm_source
-debug
-test
-EOF
-            sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
+
+          # If params less than 5, add defaults
+          PARAM_FILE="combined-results/unfurl-params.txt"
+          if [ $(wc -l < "$PARAM_FILE") -lt 5 ]; then
+            for p in id q search query page limit offset sort filter category name email user redirect url callback ref source utm_source debug test; do
+              echo "$p" >> "$PARAM_FILE"
+            done
+            sort -u "$PARAM_FILE" -o "$PARAM_FILE"
           fi
+
           grep -v '?' combined-results/all-urls.txt > combined-results/static-urls.txt || true
           grep '?' combined-results/all-urls.txt > combined-results/dynamic-urls.txt || true
           rm -f all-urls.tmp
@@ -236,7 +159,6 @@ EOF
           TOTAL=$(wc -l < combined-results/all-urls.txt)
           echo "dynamic=$DYNAMIC" >> $GITHUB_OUTPUT
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
-          echo "Found $DYNAMIC dynamic URLs, $TOTAL total URLs"
 
       - name: Cache combined results
         uses: actions/cache@v3
