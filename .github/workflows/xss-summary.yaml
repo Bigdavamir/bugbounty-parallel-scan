@@ -18,52 +18,134 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Restore combined results
-        uses: actions/cache@v4
+        uses: actions/cache@v3
         with:
           path: combined-results/
           key: combined-results-${{ inputs.run_id }}
           restore-keys: |
             combined-results-
 
-      - name: Restore httpx results
-        uses: actions/cache@v4
+      # Restore cache for all HTTPX chunks (1 تا 8)
+      - name: Restore httpx results 1
+        uses: actions/cache@v3
         with:
-          path: httpx-results/
-          key: httpx-results-*-${{ inputs.run_id }}
-          restore-keys: |
-            httpx-results-
-
-      - name: Restore x8 results
-        uses: actions/cache@v4
+          path: httpx-results-1/
+          key: httpx-results-1-${{ inputs.run_id }}
+      - name: Restore httpx results 2
+        uses: actions/cache@v3
         with:
-          path: x8-results/
-          key: x8-results-*-${{ inputs.run_id }}
-          restore-keys: |
-            x8-results-
-
-      - name: Restore kxss results
-        uses: actions/cache@v4
+          path: httpx-results-2/
+          key: httpx-results-2-${{ inputs.run_id }}
+      - name: Restore httpx results 3
+        uses: actions/cache@v3
         with:
-          path: kxss-results/
-          key: kxss-results-*-${{ inputs.run_id }}
-          restore-keys: |
-            kxss-results-
+          path: httpx-results-3/
+          key: httpx-results-3-${{ inputs.run_id }}
+      - name: Restore httpx results 4
+        uses: actions/cache@v3
+        with:
+          path: httpx-results-4/
+          key: httpx-results-4-${{ inputs.run_id }}
+      - name: Restore httpx results 5
+        uses: actions/cache@v3
+        with:
+          path: httpx-results-5/
+          key: httpx-results-5-${{ inputs.run_id }}
+      - name: Restore httpx results 6
+        uses: actions/cache@v3
+        with:
+          path: httpx-results-6/
+          key: httpx-results-6-${{ inputs.run_id }}
+      - name: Restore httpx results 7
+        uses: actions/cache@v3
+        with:
+          path: httpx-results-7/
+          key: httpx-results-7-${{ inputs.run_id }}
+      - name: Restore httpx results 8
+        uses: actions/cache@v3
+        with:
+          path: httpx-results-8/
+          key: httpx-results-8-${{ inputs.run_id }}
+      
+      # Restore cache for all X8 chunks (1 تا 4)
+      - name: Restore x8 results 1
+        uses: actions/cache@v3
+        with:
+          path: x8-results-1/
+          key: x8-results-1-${{ inputs.run_id }}
+      - name: Restore x8 results 2
+        uses: actions/cache@v3
+        with:
+          path: x8-results-2/
+          key: x8-results-2-${{ inputs.run_id }}
+      - name: Restore x8 results 3
+        uses: actions/cache@v3
+        with:
+          path: x8-results-3/
+          key: x8-results-3-${{ inputs.run_id }}
+      - name: Restore x8 results 4
+        uses: actions/cache@v3
+        with:
+          path: x8-results-4/
+          key: x8-results-4-${{ inputs.run_id }}
+      
+      # Restore cache for all KXSS chunks (1 تا 6)
+      - name: Restore kxss results 1
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-1/
+          key: kxss-results-1-${{ inputs.run_id }}
+      - name: Restore kxss results 2
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-2/
+          key: kxss-results-2-${{ inputs.run_id }}
+      - name: Restore kxss results 3
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-3/
+          key: kxss-results-3-${{ inputs.run_id }}
+      - name: Restore kxss results 4
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-4/
+          key: kxss-results-4-${{ inputs.run_id }}
+      - name: Restore kxss results 5
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-5/
+          key: kxss-results-5-${{ inputs.run_id }}
+      - name: Restore kxss results 6
+        uses: actions/cache@v3
+        with:
+          path: kxss-results-6/
+          key: kxss-results-6-${{ inputs.run_id }}
 
+      # Aggregate results and create final summary
       - name: Aggregate results and generate summary
         run: |
           echo "Aggregating results..."
           mkdir -p final-results
 
-          find httpx-results/ -name "httpx.txt" -exec cat {} \; > final-results/httpx.txt || echo "No httpx results found."
-          find x8-results/ -name "x8.txt" -exec cat {} \; > final-results/x8-brute.txt || echo "No x8 results found."
-          find kxss-results/ -name "kxss-output.txt" -exec cat {} \; > final-results/kxss-out.txt || echo "No kxss results found."
+          # Debug listing files for troubleshooting
+          echo "-- DEBUG: Listing all result files --"
+          find . -type f \( -path "./httpx-results-*/httpx.txt" -o -path "./x8-results-*/x8.txt" -o -path "./kxss-results-*/kxss-output.txt" \) -exec echo {} \; | sort
 
-          if ls kxss-results/*/kxss-output.txt 1> /dev/null 2>&1; then
-            grep -E '^.*\|.*=KXSS' kxss-results/*/kxss-output.txt | awk -F '|' '{gsub(/^[  ]+|[  ]+$/, "", $2); print $1 " | " $2}' | sort -u > final-results/kxss-reflected-pairs.txt
+          # Aggregate httpx results
+          find httpx-results-*/ -name "httpx.txt" -exec cat {} \; > final-results/httpx.txt || echo "No httpx results found."
+          # Aggregate x8 results
+          find x8-results-*/ -name "x8.txt" -exec cat {} \; > final-results/x8-brute.txt || echo "No x8 results found."
+          # Aggregate kxss results
+          find kxss-results-*/ -name "kxss-output.txt" -exec cat {} \; > final-results/kxss-out.txt || echo "No kxss results found."
+
+          # Parse kxss output for reflected pairs
+          if ls kxss-results-*/kxss-output.txt 1> /dev/null 2>&1; then
+            grep -E '^.*\|.*=KXSS' kxss-results-*/kxss-output.txt | awk -F '|' '{gsub(/^[  ]+|[  ]+$/, "", $2); print $1 " | " $2}' | sort -u > final-results/kxss-reflected-pairs.txt
           else
             touch final-results/kxss-reflected-pairs.txt
           fi
 
+          # Count rows for summary
           WAYBACK_COUNT=$(wc -l < combined-results/waybackurls.txt 2>/dev/null || echo 0)
           GAU_COUNT=$(wc -l < combined-results/gau.txt 2>/dev/null || echo 0)
           TOTAL_URLS=$(wc -l < combined-results/all-urls.txt 2>/dev/null || echo 0)
@@ -117,7 +199,7 @@ jobs:
           echo "Summary generation completed."
 
       - name: Upload final results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: bug-hunt-results-${{ inputs.domain }}
           path: final-results/
