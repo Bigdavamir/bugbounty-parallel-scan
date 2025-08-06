@@ -1,4 +1,4 @@
-name: "XSS Summary Generation"
+name: Parallel Bug Hunt - Part 2 Summary
 
 on:
   workflow_dispatch:
@@ -8,17 +8,16 @@ on:
         required: true
         default: 'example.com'
       headers:
-        description: 'Custom headers (optional)'
+        description: 'Custom headers (e.g. "Authorization: Bearer TOKEN")'
         required: false
 
 jobs:
+  # Job 7: Final summary
   final-summary:
-    # This job depends on all the tool jobs defined in xss-tools.yaml
-    # Make sure the job IDs match the ones in xss-tools.yaml
-    needs: [httpx-scan, x8-scan, kxss-scan]
+    needs: [httpx-scan, x8-scan, kxss-scan] # Ensure these job names match the ones in xss-tools.yaml
     runs-on: ubuntu-latest
     steps:
-      - name: Download all tool results
+      - name: Download all results
         uses: actions/download-artifact@v4
         with:
           pattern: "*" # Downloads all artifacts from previous jobs
@@ -26,9 +25,11 @@ jobs:
 
       - name: Generate final summary
         run: |
+          # Set domain variable
           DOMAIN="${{ inputs.domain }}"
 
-          # Combine all results similar to the original xss.yaml
+          # Combine all results (assuming artifact names are consistent with previous stages)
+          # You might need to adjust artifact names if they differ from url-gathering.yaml or xss-tools.yaml
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; > httpx.txt || true
           find . -name "httpx-results-*" -type d -exec grep '?' {}/*.txt \; > dynamic-httpx.txt || true
           find . -name "x8-results-*" -type d -exec cat {}/*.txt \; > x8-brute.txt || true
@@ -40,61 +41,79 @@ jobs:
             url_start = index($0, "URL: ") + 5
             param_pos = index($0, " Param: ")
             url = substr($0, url_start, param_pos - url_start)
+
             param_start = param_pos + 8
             unfilt_pos = index($0, " Unfiltered: ")
             param = substr($0, param_start, unfilt_pos - param_start)
+
             unfilt_start = unfilt_pos + 13
             unfiltered = substr($0, unfilt_start)
+
             if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
               print url " | " param " | Unfiltered: " unfiltered
             }
           }
           ' kxss-out.txt > kxss-reflected-pairs.txt
 
-          # Helper function to count lines or return 0 if file doesn't exist
+          # Helper function to count lines in a file, returns 0 if file doesn't exist
           count_or_zero(){
             [[ -f "$1" ]] && wc -l < "$1" || echo 0
           }
 
-          # Generate summary counts (these might need adjustment based on actual artifact names from url-gathering.yaml)
-          # Assuming artifacts like 'passive-wayback', 'passive-gau', 'combined-results' are available
-          WAYBACK_COUNT=$(count_or_zero passive-wayback/waybackurls.txt)
-          GAU_COUNT=$(count_or_zero passive-gau/gau.txt)
-          ALLURLS_COUNT=$(count_or_zero combined-results/all-urls.txt) # Ensure this artifact name is correct
-          STATIC_COUNT=$(grep -iv "?" combined-results/all-urls.txt 2>/dev/null | sort -u | wc -l || echo 0) # Ensure this artifact name is correct
-          DYNAMIC_COUNT=$(count_or_zero dynamic-httpx.txt)
-          HTTPX_COUNT=$(count_or_zero httpx.txt)
-          UNFURLPARAMS_COUNT=$(count_or_zero combined-results/unfurl-params.txt) # Ensure this artifact name is correct
-          X8_COUNT=$(count_or_zero x8-brute.txt)
-          KXSS_COUNT=$(count_or_zero kxss-out.txt)
+          # Generate summary counts
+          # IMPORTANT: Verify that the artifact paths/names used here match exactly
+          # what was generated and uploaded in the previous stages (e.g., url-gathering.yaml and xss-tools.yaml).
+          # Common artifact names could be from 'combined-results', 'httpx-results-*', etc.
+          WAYBACK_COUNT=$(count_or_zero passive-wayback/waybackurls.txt) # Assuming waybackurls.txt is in an artifact named passive-wayback
+          GAU_COUNT=$(count_or_zero passive-gau/gau.txt) # Assuming gau.txt is in an artifact named passive-gau
+          ALLURLS_COUNT=$(count_or_zero combined-results/all-urls.txt) # Assuming combined-results artifact contains all-urls.txt
+          STATIC_COUNT=$(grep -iv "?" combined-results/all-urls.txt 2>/dev/null | sort -u | wc -l || echo 0) # Counting static URLs from all-urls.txt
+          DYNAMIC_COUNT=$(count_or_zero dynamic-httpx.txt) # Result from httpx-scan job
+          HTTPX_COUNT=$(count_or_zero httpx.txt) # Combined httpx results
+          UNFURLPARAMS_COUNT=$(count_or_zero combined-results/unfurl-params.txt) # Assuming unfurl-params.txt is in combined-results artifact
+          X8_COUNT=$(count_or_zero x8-brute.txt) # Combined x8 results
+          KXSS_COUNT=$(count_or_zero kxss-out.txt) # Combined kxss results
 
-          # Print summary to console
+          # Print summary to console using echo
           echo "============ Recon Summary for $DOMAIN ============"
-          printf "%-22s: %d
-" "waybackurls" "$WAYBACK_COUNT"
-          printf "%-22s: %d
-" "gau" "$GAU_COUNT"
-          printf "%-22s: %d
-" "All unique URLs" "$ALLURLS_COUNT"
-          printf "%-22s: %d
-" "Static URLs" "$STATIC_COUNT"
-          printf "%-22s: %d
-" "Dynamic URLs" "$DYNAMIC_COUNT"
-          printf "%-22s: %d
-" "Unique URL params" "$UNFURLPARAMS_COUNT"
-          printf "%-22s: %d
-" "httpx (alive URLs)" "$HTTPX_COUNT"
-          printf "%-22s: %d
-" "x8 reflections lines" "$X8_COUNT"
-          printf "%-22s: %d
-" "kxss scan lines" "$KXSS_COUNT"
+          echo "waybackurls: $WAYBACK_COUNT"
+          echo "gau: $GAU_COUNT"
+          echo "All unique URLs: $ALLURLS_COUNT"
+          echo "Static URLs: $STATIC_COUNT"
+          echo "Dynamic URLs: $DYNAMIC_COUNT"
+          echo "Unique URL params: $UNFURLPARAMS_COUNT"
+          echo "httpx (alive URLs): $HTTPX_COUNT"
+          echo "x8 reflections lines: $X8_COUNT"
+          echo "kxss scan lines: $KXSS_COUNT"
+          if [[ -n "${{ inputs.domain }}" ]]; then # Check if domain is provided
+            echo "Target Domain: ${{ inputs.domain }}"
+          fi
           if [[ -n "${{ inputs.headers }}" ]]; then
-            printf "%-22s: %s
-" "Headers used" "${{ inputs.headers }}"
+            echo "Headers used: ${{ inputs.headers }}"
           fi
           echo "=================================================="
 
-          # Show reflected pairs and health check
+          # Save summary to file using echo
+          mkdir -p final-results
+          echo "============ Recon Summary for $DOMAIN ============" > final-results/FINAL_SUMMARY.txt
+          echo "waybackurls: $WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "gau: $GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "All unique URLs: $ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Static URLs: $STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Dynamic URLs: $DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Unique URL params: $UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "httpx (alive URLs): $HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "x8 reflections lines: $X8_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "kxss scan lines: $KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          if [[ -n "${{ inputs.domain }}" ]]; then # Check if domain is provided
+            echo "Target Domain: ${{ inputs.domain }}" >> final-results/FINAL_SUMMARY.txt
+          fi
+          if [[ -n "${{ inputs.headers }}" ]]; then
+            echo "Headers used: ${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
+          fi
+          echo "==================================================" >> final-results/FINAL_SUMMARY.txt
+
+          # Show reflected pairs (first 5)
           if [[ -s "kxss-reflected-pairs.txt" ]]; then
             echo "[*] First 5 reflected pairs:"
             head -5 "kxss-reflected-pairs.txt"
@@ -102,49 +121,25 @@ jobs:
             echo "[!] No reflected pairs found."
           fi
 
+          # Health check
           if grep -q "1.bigdav.ir" "kxss-reflected-pairs.txt"; then
             echo "[✓] Health check passed."
           else
             echo "[✗] Health check failed."
           fi
 
-          # Save final results for upload artifact
-          mkdir -p final-results
+          # Save other combined results for upload
           cp httpx.txt final-results/ || true
           cp dynamic-httpx.txt final-results/ || true
           cp x8-brute.txt final-results/ || true
           cp kxss-out.txt final-results/ || true
           cp kxss-reflected-pairs.txt final-results/ || true
 
-          # Also save the formatted summary to a file
-          echo "============ Recon Summary for $DOMAIN ============" > final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "waybackurls" "$WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "gau" "$GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "All unique URLs" "$ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "Static URLs" "$STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "Dynamic URLs" "$DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "Unique URL params" "$UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "httpx (alive URLs)" "$HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "x8 reflections lines" "$X8_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "kxss scan lines" "$KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            printf "%-22s: %s
-" "Headers used" "${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
-          fi
-          echo "==================================================" >> final-results/FINAL_SUMMARY.txt
+          # Copy the generated summary file to the final-results directory as well
+          cp final-results/FINAL_SUMMARY.txt final-results/ || true
 
-      - name: Upload final results artifact
+      - name: Upload final results
         uses: actions/upload-artifact@v4
         with:
           name: FINAL-RESULTS-${{ inputs.domain }}
           path: final-results/
-
