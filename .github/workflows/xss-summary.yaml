@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Restore combined results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: combined-results/
           key: combined-results-${{ inputs.run_id }}
@@ -26,7 +26,7 @@ jobs:
             combined-results-
 
       - name: Restore httpx results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: httpx-results/
           key: httpx-results-*-${{ inputs.run_id }}
@@ -34,7 +34,7 @@ jobs:
             httpx-results-
 
       - name: Restore x8 results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: x8-results/
           key: x8-results-*-${{ inputs.run_id }}
@@ -42,7 +42,7 @@ jobs:
             x8-results-
 
       - name: Restore kxss results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: kxss-results/
           key: kxss-results-*-${{ inputs.run_id }}
