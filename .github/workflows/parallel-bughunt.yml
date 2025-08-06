@@ -1,4 +1,4 @@
-name: Advanced Distributed BugHunt - Fixed
+name: Advanced Distributed BugHunt - Fixed YAML
 
 on:
   workflow_dispatch:
@@ -239,7 +239,7 @@ jobs:
           echo "http://${DOMAIN}/" >> combined_results/all-raw-urls.txt
           
           # Add some common paths with parameters for testing
-          cat >> combined_results/all-raw-urls.txt << EOF
+          cat >> combined_results/all-raw-urls.txt << 'EOF'
           https://${DOMAIN}/search?q=test&category=all
           https://${DOMAIN}/login?redirect=%2Fdashboard
           https://${DOMAIN}/api/users?id=1&format=json
@@ -247,6 +247,9 @@ jobs:
           https://www.${DOMAIN}/page?ref=home&utm_source=google
           https://${DOMAIN}/contact?subject=hello&name=test
           EOF
+          
+          # Replace ${DOMAIN} with actual domain
+          sed -i "s/\${DOMAIN}/${DOMAIN}/g" combined_results/all-raw-urls.txt
           
           # Remove empty lines and make unique
           sed '/^$/d' combined_results/all-raw-urls.txt | sort -u > combined_results/temp-urls.txt
@@ -264,9 +267,9 @@ jobs:
             if command -v unfurl >/dev/null 2>&1; then
               unfurl --unique keys < combined_results/all-clean-urls.txt | sort -u > combined_results/params.txt
             else
-              # Manual parameter extraction as fallback
-              grep '?' combined_results/all-clean-urls.txt | sed 's/.*?//; s/&/
-/g' | sed 's/=.*//' | sort -u > combined_results/params.txt
+              # Manual parameter extraction as fallback - FIXED SYNTAX
+              grep '?' combined_results/all-clean-urls.txt | sed 's/.*?//' | tr '&' '
+' | sed 's/=.*//' | sort -u > combined_results/params.txt
             fi
           else
             touch combined_results/params.txt
@@ -274,7 +277,7 @@ jobs:
           
           # Add common parameters if file is empty/small
           if [ $(wc -l < combined_results/params.txt) -lt 5 ]; then
-            cat >> combined_results/params.txt << EOF
+            cat >> combined_results/params.txt << 'EOF'
           id
           q
           search
@@ -442,17 +445,17 @@ jobs:
           ALIVE_URLS=$(wc -l < final_results/all-alive-urls.txt 2>/dev/null || echo 0)
           PARAMS=$(wc -l < final_results/params.txt 2>/dev/null || echo 0)
           
-          cat > final_results/FINAL_SUMMARY.txt << EOF
+          cat > final_results/FINAL_SUMMARY.txt << 'EOF'
           ==================== DISTRIBUTED SCAN RESULTS ====================
-          Domain: $DOMAIN
+          Domain: ${DOMAIN}
           Date: $(date)
           Scan Status: URL Collection and Alive Check Completed
           
           📊 URL Statistics:
-          - Total URLs found: $TOTAL_URLS
-          - Dynamic URLs: $DYNAMIC_URLS  
-          - Alive URLs (httpx): $ALIVE_URLS
-          - Unique parameters: $PARAMS
+          - Total URLs found: ${TOTAL_URLS}
+          - Dynamic URLs: ${DYNAMIC_URLS}  
+          - Alive URLs (httpx): ${ALIVE_URLS}
+          - Unique parameters: ${PARAMS}
           
           🔍 Reflection Results:
           - X8 reflections: 0 (skipped in this run)
@@ -468,6 +471,14 @@ jobs:
           Next Steps: Run advanced reflection testing with working tools
           ==================================================================
           EOF
+          
+          # Replace variables in the template
+          sed -i "s/\${DOMAIN}/${DOMAIN}/g" final_results/FINAL_SUMMARY.txt
+          sed -i "s/\${TOTAL_URLS}/${TOTAL_URLS}/g" final_results/FINAL_SUMMARY.txt
+          sed -i "s/\${DYNAMIC_URLS}/${DYNAMIC_URLS}/g" final_results/FINAL_SUMMARY.txt
+          sed -i "s/\${ALIVE_URLS}/${ALIVE_URLS}/g" final_results/FINAL_SUMMARY.txt
+          sed -i "s/\${PARAMS}/${PARAMS}/g" final_results/FINAL_SUMMARY.txt
+          sed -i "s/\$(date)/$(date)/g" final_results/FINAL_SUMMARY.txt
           
           echo "========== FINAL SUMMARY =========="
           cat final_results/FINAL_SUMMARY.txt
