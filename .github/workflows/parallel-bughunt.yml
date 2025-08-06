@@ -15,55 +15,71 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies (jq, moreutils)
+      - name: Install dependencies (jq, moreutils, gzip, tar, unzip)
         run: |
           sudo apt update
-          sudo apt install -y jq moreutils
+          sudo apt install -y jq moreutils gzip tar unzip curl wget
 
       - name: Install bugbounty tools (all from release)
         run: |
           set -e
-
+          
           BIN_DIR="/usr/local/bin"
+          TEMP_DIR="/tmp/bugbounty_tools"
+          mkdir -p "$TEMP_DIR"
+          cd "$TEMP_DIR"
 
-          # waybackurls
-          WAYBACK_VER=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest | grep tag_name | cut -d '"' -f4)
+          echo "Installing waybackurls..."
+          WAYBACK_VER=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest | jq -r '.tag_name')
           curl -L "https://github.com/tomnomnom/waybackurls/releases/download/${WAYBACK_VER}/waybackurls_linux_amd64" -o waybackurls
           chmod +x waybackurls && sudo mv waybackurls $BIN_DIR/
 
-          # anew
-          ANEW_VER=$(curl -s https://api.github.com/repos/tomnomnom/anew/releases/latest | grep tag_name | cut -d '"' -f4)
+          echo "Installing anew..."
+          ANEW_VER=$(curl -s https://api.github.com/repos/tomnomnom/anew/releases/latest | jq -r '.tag_name')
           curl -L "https://github.com/tomnomnom/anew/releases/download/${ANEW_VER}/anew_linux_amd64" -o anew
           chmod +x anew && sudo mv anew $BIN_DIR/
 
-          # unfurl
-          UNFURL_VER=$(curl -s https://api.github.com/repos/tomnomnom/unfurl/releases/latest | grep tag_name | cut -d '"' -f4)
+          echo "Installing unfurl..."
+          UNFURL_VER=$(curl -s https://api.github.com/repos/tomnomnom/unfurl/releases/latest | jq -r '.tag_name')
           curl -L "https://github.com/tomnomnom/unfurl/releases/download/${UNFURL_VER}/unfurl_linux_amd64" -o unfurl
           chmod +x unfurl && sudo mv unfurl $BIN_DIR/
 
-          # kxss
-          KXSS_VER=$(curl -s https://api.github.com/repos/tomnomnom/kxss/releases/latest | grep tag_name | cut -d '"' -f4)
+          echo "Installing kxss..."
+          KXSS_VER=$(curl -s https://api.github.com/repos/tomnomnom/kxss/releases/latest | jq -r '.tag_name')
           curl -L "https://github.com/tomnomnom/kxss/releases/download/${KXSS_VER}/kxss_linux_amd64" -o kxss
           chmod +x kxss && sudo mv kxss $BIN_DIR/
 
-          # gau
-          GAU_URL=$(curl -s https://api.github.com/repos/lc/gau/releases/latest | grep "browser_download_url.*linux_amd64" | grep -o 'https://[^"]*' | head -n1)
-          wget -q -O gau "$GAU_URL"
+          echo "Installing gau..."
+          GAU_VER=$(curl -s https://api.github.com/repos/lc/gau/releases/latest | jq -r '.tag_name')
+          GAU_URL="https://github.com/lc/gau/releases/download/${GAU_VER}/gau_${GAU_VER}_linux_amd64.tar.gz"
+          wget -q -O gau.tar.gz "$GAU_URL"
+          tar -xzf gau.tar.gz
           chmod +x gau && sudo mv gau $BIN_DIR/
 
-          # httpx (fixed block, use .tar.gz)
-          HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d '"' -f4)
-          curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.tar.gz" -o httpx.tar.gz
-          tar -xzf httpx.tar.gz httpx
-          sudo mv httpx $BIN_DIR/
-          rm -f httpx.tar.gz
+          echo "Installing httpx..."
+          HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | jq -r '.tag_name')
+          curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.zip" -o httpx.zip
+          unzip -q httpx.zip
+          chmod +x httpx && sudo mv httpx $BIN_DIR/
 
-          # x8
-          X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep tag_name | cut -d '"' -f4)
+          echo "Installing x8..."
+          X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | jq -r '.tag_name')
           curl -L "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o x8
           chmod +x x8 && sudo mv x8 $BIN_DIR/
 
-          sudo chmod -R +x $BIN_DIR/*
+          # Cleanup temp directory
+          cd /
+          rm -rf "$TEMP_DIR"
+          
+          # Verify installations
+          echo "Verifying installations..."
+          waybackurls --help || echo "waybackurls installation issue"
+          anew --help || echo "anew installation issue"
+          unfurl --help || echo "unfurl installation issue"
+          kxss --help || echo "kxss installation issue"
+          gau --help || echo "gau installation issue"
+          httpx --help || echo "httpx installation issue"
+          x8 --help || echo "x8 installation issue"
 
       - name: Make main.sh executable
         run: chmod +x main.sh
