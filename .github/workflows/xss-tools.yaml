@@ -16,9 +16,11 @@ jobs:
         chunk: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Download combined results from previous stage
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
-          name: combined-results # Assuming url-gathering uploads results with this name
+          workflow: Parallel Bug Hunt - Part1
+          workflow_conclusion: success
+          name: combined-results
           path: combined-results/
 
       - name: Install httpx with PATH fix
@@ -74,8 +76,10 @@ jobs:
         chunk: [1, 2, 3, 4]
     steps:
       - name: Download combined results
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
+          workflow: Parallel Bug Hunt - Part1
+          workflow_conclusion: success
           name: combined-results
           path: combined-results/
 
@@ -150,8 +154,10 @@ jobs:
         chunk: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Download combined results
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
+          workflow: Parallel Bug Hunt - Part1
+          workflow_conclusion: success
           name: combined-results
           path: combined-results/
 
@@ -161,60 +167,3 @@ jobs:
           pattern: httpx-results-*
           merge-multiple: true
         continue-on-error: true
-
-      - name: Install kxss
-        run: |
-          go install github.com/Emoe/kxss@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-      - name: Generate kxss URLs and run scan
-        run: |
-          mkdir -p kxss-results-${{ matrix.chunk }}
-          export PATH=$PATH:$(go env GOPATH)/bin
-          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
-
-          # Prepare URLs for kxss with parameters
-          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
-            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 6 + 1))
-            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
-            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-
-            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > kxss-urls-${{ matrix.chunk }}.txt
-
-            if [[ -s "kxss-urls-${{ matrix.chunk }}.txt" ]]; then
-              echo "Running kxss for chunk ${{ matrix.chunk }}..."
-              # Prepare input for kxss - combine URL with parameter
-              cat kxss-urls-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 |
-              while IFS= read -r url; do
-                if [[ -f "combined-results/unfurl-params.txt" ]]; then
-                  while IFS= read -r param; do
-                    echo "$url?${param}=KXSS"
-                  done < combined-results/unfurl-params.txt
-                else
-                  echo "$url" # If no parameters found, just use the URL
-                fi
-              done | sort -u > kxss-urls-final-${{ matrix.chunk }}.txt
-
-              if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
-                cat kxss-urls-final-${{ matrix.chunk }}.txt | kxss -timeout 300 -threads 50 > kxss-results-${{ matrix.chunk }}/kxss-output.txt || {
-                  echo "kxss scan failed for chunk ${{ matrix.chunk }}"
-                  touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
-                }
-              else
-                touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
-              fi
-            else
-              touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
-            fi
-          else
-            touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
-          fi
-          KXSS_COUNT=$(wc -l < kxss-results-${{ matrix.chunk }}/kxss-output.txt)
-          echo "kxss found $KXSS_COUNT results for chunk ${{ matrix.chunk }}"
-
-      - name: Upload kxss results
-        uses: actions/upload-artifact@v4
-        with:
-          name: kxss-results-${{ matrix.chunk }}
-          path: kxss-results-${{ matrix.chunk }}/
-
