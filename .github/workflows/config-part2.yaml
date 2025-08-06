@@ -1,32 +1,55 @@
-name: Parallel Bug Hunt - Fixed (Part 2)
+name: Parallel Bug Hunt - Part2
 
 on:
-  workflow_dispatch:
-    inputs:
-      domain:
-        description: 'Target domain (e.g., example.com)'
-        required: true
-        type: string
-      headers:
-        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
-        required: false
-        type: string
-        default: ''
-
+  workflow_run:
+    workflows: ["Parallel Bug Hunt - Part1"]
+    types:
+      - completed
+    
 jobs:
-  # This is a continuation of the workflow, dependent on the first part
-  # You would need to trigger this after the first workflow completes
-  
+  # First job to get inputs from previous workflow
+  get-inputs:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      domain: ${{ steps.get-domain.outputs.domain }}
+      headers: ${{ steps.get-headers.outputs.headers }}
+    steps:
+      - name: Download artifact
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: "Parallel Bug Hunt - Part1"
+          run_id: ${{ github.event.workflow_run.id }}
+          name: input-parameters
+          path: input-parameters
+
+      - name: Get domain from artifact
+        id: get-domain
+        run: |
+          DOMAIN=$(cat input-parameters/domain.txt)
+          echo "domain=$DOMAIN" >> $GITHUB_OUTPUT
+          echo "Domain from previous workflow: $DOMAIN"
+      
+      - name: Get headers from artifact
+        id: get-headers
+        run: |
+          HEADERS=$(cat input-parameters/headers.txt)
+          echo "headers=$HEADERS" >> $GITHUB_OUTPUT
+          echo "Headers from previous workflow: $HEADERS"
+
   # Job 4: Run httpx on dynamic URLs (parallel chunks)
   httpx-scan:
+    needs: get-inputs
     runs-on: ubuntu-latest
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Download combined results
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
+          workflow: "Parallel Bug Hunt - Part1"
+          run_id: ${{ github.event.workflow_run.id }}
           name: combined-results
           path: combined-results/
 
@@ -89,15 +112,17 @@ jobs:
 
   # Job 5: Run x8 parameter bruteforce (parallel)
   x8-scan:
-    needs: httpx-scan
+    needs: [get-inputs, httpx-scan]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         chunk: [1, 2, 3, 4]
     steps:
       - name: Download combined results
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
+          workflow: "Parallel Bug Hunt - Part1"
+          run_id: ${{ github.event.workflow_run.id }}
           name: combined-results
           path: combined-results/
 
@@ -139,8 +164,8 @@ jobs:
 
             if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
               # Build x8 command with optional headers
-              if [[ -n "${{ inputs.headers }}" ]]; then
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
+              if [[ -n "${{ needs.get-inputs.outputs.headers }}" ]]; then
+                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ needs.get-inputs.outputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
               else
                 cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
               fi
@@ -159,15 +184,17 @@ jobs:
 
   # Job 6: Run kxss (parallel)
   kxss-scan:
-    needs: httpx-scan
+    needs: [get-inputs, httpx-scan]
     runs-on: ubuntu-latest
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Download combined results
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v2
         with:
+          workflow: "Parallel Bug Hunt - Part1"
+          run_id: ${{ github.event.workflow_run.id }}
           name: combined-results
           path: combined-results/
 
@@ -242,7 +269,7 @@ jobs:
 
   # Job 7: Final summary
   final-summary:
-    needs: [x8-scan, kxss-scan]
+    needs: [get-inputs, x8-scan, kxss-scan]
     runs-on: ubuntu-latest
     steps:
       - name: Download all results
@@ -254,7 +281,7 @@ jobs:
       - name: Generate final summary
         run: |
           # Set domain variable
-          DOMAIN="${{ inputs.domain }}"
+          DOMAIN="${{ needs.get-inputs.outputs.domain }}"
 
           # Combine all results
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; > httpx.txt || true
@@ -315,8 +342,8 @@ jobs:
             echo "KXSS scan lines: $KXSS_COUNT"
             echo "========================================================"
             
-            if [[ -n "${{ inputs.headers }}" ]]; then
-              echo "Custom Headers: ${{ inputs.headers }}"
+            if [[ -n "${{ needs.get-inputs.outputs.headers }}" ]]; then
+              echo "Custom Headers: ${{ needs.get-inputs.outputs.headers }}"
               echo "========================================================"
             fi
             
@@ -346,12 +373,3 @@ jobs:
           
           # Copy key output files to final-results
           cp httpx.txt dynamic-httpx.txt x8-brute.txt kxss-out.txt kxss-reflected-pairs.txt final-results/ 2>/dev/null || true
-          
-          # Display summary
-          cat final-results/FINAL_SUMMARY.txt
-
-      - name: Upload final results
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.domain }}-recon-results
-          path: final-results/
