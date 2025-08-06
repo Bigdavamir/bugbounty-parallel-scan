@@ -321,7 +321,7 @@ jobs:
           echo "${{ inputs.headers }}" > input-parameters/headers.txt
 
       - name: Cache input parameters
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: input-parameters/
           key: input-parameters-${{ inputs.run_id }}
