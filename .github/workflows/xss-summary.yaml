@@ -117,7 +117,7 @@ jobs:
           echo "Summary generation completed."
 
       - name: Upload final results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bug-hunt-results-${{ inputs.domain }}
           path: final-results/
