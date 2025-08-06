@@ -1,4 +1,4 @@
-name: Parallel BugHunt
+name: Distributed BugHunt
 
 on:
   workflow_dispatch:
@@ -6,31 +6,31 @@ on:
       domain:
         description: "Target domain (e.g., example.com)"
         required: true
+      workers:
+        description: "Number of parallel workers (1-10)"
+        required: false
+        default: "4"
 
 jobs:
-  bughunt:
+  # First job: Collect all URLs
+  collect-urls:
     runs-on: ubuntu-latest
-
+    outputs:
+      total-urls: ${{ steps.count.outputs.total }}
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies (jq, moreutils)
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y jq moreutils
+          sudo apt install -y jq moreutils curl wget
 
-      - name: Install Go (for kxss only)
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-
-      - name: Install bugbounty tools (all from release)
+      - name: Install collection tools
         run: |
-          set -e
-
           BIN_DIR="/usr/local/bin"
-
+          
           # waybackurls
           WAYBACK_VER=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest | grep tag_name | cut -d '"' -f4)
           curl -L "https://github.com/tomnomnom/waybackurls/releases/download/${WAYBACK_VER}/waybackurls_linux_amd64" -o waybackurls
@@ -46,49 +46,289 @@ jobs:
           curl -L "https://github.com/tomnomnom/unfurl/releases/download/${UNFURL_VER}/unfurl_linux_amd64" -o unfurl
           chmod +x unfurl && sudo mv unfurl $BIN_DIR/
 
-          # kxss (using go install instead of release)
-          echo "Installing kxss from source..."
-          go install github.com/tomnomnom/kxss@latest
-          sudo cp ~/go/bin/kxss $BIN_DIR/
-
-          # gau (keep the working version)
+          # gau
           GAU_URL=$(curl -s https://api.github.com/repos/lc/gau/releases/latest | grep "browser_download_url.*linux_amd64" | grep -o 'https://[^"]*' | head -n1)
           wget -q -O gau "$GAU_URL"
           chmod +x gau && sudo mv gau $BIN_DIR/
 
-          # httpx (keep the working version)
+          # Verify installations
+          echo "Verifying tool installations:"
+          waybackurls --version || echo "waybackurls installed"
+          anew --help >/dev/null 2>&1 && echo "anew installed" || echo "anew check failed"
+          unfurl --help >/dev/null 2>&1 && echo "unfurl installed" || echo "unfurl check failed"
+          gau --version || echo "gau installed"
+
+      - name: Collect URLs
+        run: |
+          DOMAIN="${{ github.event.inputs.domain }}"
+          WORKDIR="./${DOMAIN}_collect"
+          mkdir -p "$WORKDIR"
+          cd "$WORKDIR"
+          
+          # Extensions to filter out
+          EXTS='(json|js|css|jpg|jpeg|png|svg|gif|exe|mp4|flv|pdf|doc|webm|wmv|webp|mov|mp3|avi|zip)($|\?)'
+          
+          echo "Collecting URLs from waybackurls and gau..."
+          
+          # waybackurls
+          echo "$DOMAIN" | waybackurls > waybackurls.txt || touch waybackurls.txt
+          
+          # gau with subs
+          gau "$DOMAIN" --threads 5 --subs > gau.txt || touch gau.txt
+          
+          # Combine and filter
+          cat waybackurls.txt gau.txt | grep -iEv "\.${EXTS}" | sort -u > all-urls.txt
+          
+          # Extract parameters
+          unfurl --unique keys < all-urls.txt | sort -u > params.txt
+          
+          # Get dynamic URLs only
+          grep '?' all-urls.txt > dynamic-urls.txt || touch dynamic-urls.txt
+          
+          echo "Collection completed:"
+          echo "- Total URLs: $(wc -l < all-urls.txt)"
+          echo "- Dynamic URLs: $(wc -l < dynamic-urls.txt)"
+          echo "- Parameters: $(wc -l < params.txt)"
+
+      - name: Count URLs
+        id: count
+        run: |
+          cd "./${{ github.event.inputs.domain }}_collect"
+          TOTAL=$(wc -l < dynamic-urls.txt)
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "Found $TOTAL dynamic URLs for scanning"
+
+      - name: Upload collected data
+        uses: actions/upload-artifact@v4
+        with:
+          name: collected-data
+          path: ./${{ github.event.inputs.domain }}_collect/
+
+  # Second job: Distributed scanning
+  scan:
+    needs: collect-urls
+    if: needs.collect-urls.outputs.total-urls > 0
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        worker: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: ${{ fromJson(github.event.inputs.workers) }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y jq moreutils curl wget
+
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install scan tools
+        run: |
+          BIN_DIR="/usr/local/bin"
+          
+          # httpx
           HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | grep tag_name | cut -d '"' -f4)
           curl -L "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.tar.gz" -o httpx.tar.gz
           tar -xzf httpx.tar.gz httpx
           sudo mv httpx $BIN_DIR/
           rm -f httpx.tar.gz
 
+          # kxss (using go install)
+          go install github.com/tomnomnom/kxss@latest
+          sudo cp ~/go/bin/kxss $BIN_DIR/ || cp ~/go/bin/kxss $BIN_DIR/
+
           # x8
           X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | grep tag_name | cut -d '"' -f4)
           curl -L "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o x8
           chmod +x x8 && sudo mv x8 $BIN_DIR/
 
-          sudo chmod -R +x $BIN_DIR/*
-
           # Verify installations
-          echo "Verifying installations..."
-          which waybackurls && echo "✓ waybackurls installed" || echo "✗ waybackurls failed"
-          which anew && echo "✓ anew installed" || echo "✗ anew failed"
-          which unfurl && echo "✓ unfurl installed" || echo "✗ unfurl failed"
-          which kxss && echo "✓ kxss installed" || echo "✗ kxss failed"
-          which gau && echo "✓ gau installed" || echo "✗ gau failed"
-          which httpx && echo "✓ httpx installed" || echo "✗ httpx failed"
-          which x8 && echo "✓ x8 installed" || echo "✗ x8 failed"
+          echo "Verifying scan tool installations:"
+          httpx -version || echo "httpx installed"
+          kxss --help >/dev/null 2>&1 && echo "kxss installed" || echo "kxss check: $(which kxss)"
+          x8 --help >/dev/null 2>&1 && echo "x8 installed" || echo "x8 check failed"
 
-      - name: Make main.sh executable
-        run: chmod +x main.sh
+      - name: Download collected data
+        uses: actions/download-artifact@v4
+        with:
+          name: collected-data
 
-      - name: Run main.sh
-        run: ./main.sh ${{ github.event.inputs.domain }}
+      - name: Split and scan URLs
+        run: |
+          DOMAIN="${{ github.event.inputs.domain }}"
+          WORKER="${{ matrix.worker }}"
+          TOTAL_WORKERS="${{ fromJson(github.event.inputs.workers) }}"
+          
+          COLLECT_DIR="./${DOMAIN}_collect"
+          SCAN_DIR="./${DOMAIN}_scan_worker_${WORKER}"
+          mkdir -p "$SCAN_DIR"
+          
+          echo "Worker $WORKER of $TOTAL_WORKERS starting..."
+          
+          # Calculate chunk for this worker
+          TOTAL_URLS=$(wc -l < "${COLLECT_DIR}/dynamic-urls.txt")
+          if [ "$TOTAL_URLS" -eq 0 ]; then
+            echo "No dynamic URLs to process"
+            exit 0
+          fi
+          
+          CHUNK_SIZE=$((TOTAL_URLS / TOTAL_WORKERS + 1))
+          START_LINE=$(((WORKER - 1) * CHUNK_SIZE + 1))
+          END_LINE=$((WORKER * CHUNK_SIZE))
+          
+          echo "Processing URLs $START_LINE to $END_LINE (total: $TOTAL_URLS, chunk: $CHUNK_SIZE)"
+          
+          # Extract chunk for this worker
+          sed -n "${START_LINE},${END_LINE}p" "${COLLECT_DIR}/dynamic-urls.txt" > "${SCAN_DIR}/worker-urls.txt"
+          WORKER_URLS=$(wc -l < "${SCAN_DIR}/worker-urls.txt")
+          
+          if [ "$WORKER_URLS" -eq 0 ]; then
+            echo "No URLs for worker $WORKER"
+            touch "${SCAN_DIR}/empty"
+            exit 0
+          fi
+          
+          echo "Worker $WORKER processing $WORKER_URLS URLs"
+          
+          # Run httpx on worker chunk
+          timeout 300 httpx -silent -threads 50 -timeout 3 -retries 1 < "${SCAN_DIR}/worker-urls.txt" > "${SCAN_DIR}/httpx-alive.txt" || true
+          ALIVE_COUNT=$(wc -l < "${SCAN_DIR}/httpx-alive.txt")
+          echo "Found $ALIVE_COUNT alive URLs"
+          
+          if [ "$ALIVE_COUNT" -eq 0 ]; then
+            echo "No alive URLs for worker $WORKER"
+            touch "${SCAN_DIR}/no-alive"
+            exit 0
+          fi
+          
+          # Generate kxss URLs for this worker
+          echo "Generating kxss URLs..."
+          if [ -s "${COLLECT_DIR}/params.txt" ]; then
+            mapfile -t params < <(head -50 "${COLLECT_DIR}/params.txt")  # Limit params to avoid too many combinations
+            mapfile -t urls < <(sort -u "${SCAN_DIR}/httpx-alive.txt")
+            
+            > "${SCAN_DIR}/kxss-urls.txt"
+            for url in "${urls[@]:0:100}"; do  # Limit URLs per worker
+              for param in "${params[@]}"; do
+                if [[ "$url" == *"?${param}="* ]]; then
+                  echo "$url" | sed "s/__LATEX_DELIM_0__[^&]*/\1KXSS/" >> "${SCAN_DIR}/kxss-urls.txt"
+                elif [[ "$url" == *\?* ]]; then
+                  echo "${url}&${param}=KXSS" >> "${SCAN_DIR}/kxss-urls.txt"
+                else
+                  echo "${url}?${param}=KXSS" >> "${SCAN_DIR}/kxss-urls.txt"
+                fi
+              done
+            done
+            
+            sort -u "${SCAN_DIR}/kxss-urls.txt" -o "${SCAN_DIR}/kxss-urls.txt"
+            KXSS_URLS=$(wc -l < "${SCAN_DIR}/kxss-urls.txt")
+            echo "Generated $KXSS_URLS kxss URLs"
+            
+            # Run kxss
+            if [ "$KXSS_URLS" -gt 0 ]; then
+              echo "Running kxss scan..."
+              timeout 600 kxss < "${SCAN_DIR}/kxss-urls.txt" > "${SCAN_DIR}/kxss-output.txt" 2>&1 || true
+              
+              # Parse results
+              awk '/^URL: .* Param: .* Unfiltered: / {
+                url_start = index($0, "URL: ") + 5
+                param_pos = index($0, " Param: ")
+                url = substr($0, url_start, param_pos - url_start)
+                param_start = param_pos + 8
+                unfilt_pos = index($0, " Unfiltered: ")
+                param = substr($0, param_start, unfilt_pos - param_start)
+                unfilt_start = unfilt_pos + 13
+                unfiltered = substr($0, unfilt_start)
+                if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
+                  print url " | " param " | Unfiltered: " unfiltered
+                }
+              }' "${SCAN_DIR}/kxss-output.txt" > "${SCAN_DIR}/kxss-reflected.txt"
+              
+              REFLECTED=$(wc -l < "${SCAN_DIR}/kxss-reflected.txt")
+              echo "Worker $WORKER found $REFLECTED reflections"
+            fi
+          fi
 
-      - name: Archive recon results
+      - name: Upload scan results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recon-results
-          path: ./*_recon/
+          name: scan-results-worker-${{ matrix.worker }}
+          path: ./${{ github.event.inputs.domain }}_scan_worker_${{ matrix.worker }}/
+
+  # Third job: Combine results
+  combine-results:
+    needs: [collect-urls, scan]
+    if: always() && needs.collect-urls.result == 'success'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Download all scan results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scan-results-worker-*
+          merge-multiple: true
+
+      - name: Download collected data
+        uses: actions/download-artifact@v4
+        with:
+          name: collected-data
+
+      - name: Combine and summarize results
+        run: |
+          DOMAIN="${{ github.event.inputs.domain }}"
+          FINAL_DIR="./${DOMAIN}_final_results"
+          mkdir -p "$FINAL_DIR"
+          
+          echo "Combining results from all workers..."
+          
+          # Combine all httpx results
+          find . -name "httpx-alive.txt" -exec cat {} \; | sort -u > "${FINAL_DIR}/all-httpx-alive.txt"
+          
+          # Combine all kxss results
+          find . -name "kxss-reflected.txt" -exec cat {} \; | sort -u > "${FINAL_DIR}/all-kxss-reflected.txt"
+          
+          # Combine raw kxss outputs
+          find . -name "kxss-output.txt" -exec cat {} \; > "${FINAL_DIR}/all-kxss-raw.txt"
+          
+          # Copy original collection data
+          cp "${DOMAIN}_collect"/* "${FINAL_DIR}/" 2>/dev/null || true
+          
+          # Generate summary
+          TOTAL_URLS=$(wc -l < "${DOMAIN}_collect/dynamic-urls.txt" 2>/dev/null || echo 0)
+          ALIVE_URLS=$(wc -l < "${FINAL_DIR}/all-httpx-alive.txt" 2>/dev/null || echo 0)
+          REFLECTED=$(wc -l < "${FINAL_DIR}/all-kxss-reflected.txt" 2>/dev/null || echo 0)
+          PARAMS=$(wc -l < "${DOMAIN}_collect/params.txt" 2>/dev/null || echo 0)
+          
+          cat > "${FINAL_DIR}/summary.txt" << EOF
+          ============ Distributed Scan Summary for $DOMAIN ============
+          Workers used: ${{ fromJson(github.event.inputs.workers) }}
+          Total dynamic URLs found: $TOTAL_URLS
+          Live URLs after httpx: $ALIVE_URLS
+          Unique parameters: $PARAMS
+          Total reflections found: $REFLECTED
+          ===============================================================
+          EOF
+          
+          echo "Summary:"
+          cat "${FINAL_DIR}/summary.txt"
+          
+          if [ "$REFLECTED" -gt 0 ]; then
+            echo ""
+            echo "First 20 reflections found:"
+            head -20 "${FINAL_DIR}/all-kxss-reflected.txt"
+          else
+            echo "No reflections found across all workers."
+          fi
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-distributed-results-${{ github.event.inputs.domain }}
+          path: ./${{ github.event.inputs.domain }}_final_results/
