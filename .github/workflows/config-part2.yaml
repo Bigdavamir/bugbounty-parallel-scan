@@ -73,7 +73,7 @@ jobs:
             touch httpx-results-${{ matrix.chunk }}/httpx.txt
           fi
 
-          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
+          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}.txt)
           echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
 
       - name: Upload httpx results
@@ -131,7 +131,9 @@ jobs:
           echo '#!/bin/bash
 # Fallback x8 script that simulates basic x8 functionality
 # This script is used when all installation methods fail
+' > /usr/local/bin/x8_fallback.sh
 
+          echo '
 # Parse arguments
 URL=""
 WORDLIST=""
@@ -208,9 +210,14 @@ else
   echo "Error: Wordlist file not found: $WORDLIST"
   exit 1
 fi
-' > /usr/local/bin/x8
+' >> /usr/local/bin/x8_fallback.sh
 
-          chmod +x /usr/local/bin/x8
+          chmod +x /usr/local/bin/x8_fallback.sh
+          # اگر x8 نصب نشد، از اسکریپت fallback استفاده کن
+          if ! command -v x8 >/dev/null 2>&1; then
+              echo "Using fallback x8 script."
+              alias x8='/usr/local/bin/x8_fallback.sh'
+          fi
 
       - name: Combine httpx results and run x8
         run: |
