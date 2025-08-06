@@ -550,7 +550,7 @@ jobs:
           pattern: "*"
           merge-multiple: true
 
-      - name: Generate final summary (exact main.sh logic)
+      - name: Generate final summary
         run: |
           # Set domain variable
           DOMAIN="${{ inputs.domain }}"
@@ -597,28 +597,19 @@ jobs:
           X8_COUNT=$(count_or_zero x8-brute.txt)
           KXSS_COUNT=$(count_or_zero kxss-out.txt)
 
+          # Display summary with echo instead of printf
           echo "============ Recon Summary for $DOMAIN ============"
-          printf "%-22s: %d
-" "waybackurls" "$WAYBACK_COUNT"
-          printf "%-22s: %d
-" "gau" "$GAU_COUNT"
-          printf "%-22s: %d
-" "All unique URLs" "$ALLURLS_COUNT"
-          printf "%-22s: %d
-" "Static URLs" "$STATIC_COUNT"
-          printf "%-22s: %d
-" "Dynamic URLs" "$DYNAMIC_COUNT"
-          printf "%-22s: %d
-" "Unique URL params" "$UNFURLPARAMS_COUNT"
-          printf "%-22s: %d
-" "httpx (alive URLs)" "$HTTPX_COUNT"
-          printf "%-22s: %d
-" "x8 reflections lines" "$X8_COUNT"
-          printf "%-22s: %d
-" "kxss scan lines" "$KXSS_COUNT"
+          echo "waybackurls         : $WAYBACK_COUNT"
+          echo "gau                 : $GAU_COUNT"
+          echo "All unique URLs     : $ALLURLS_COUNT"
+          echo "Static URLs         : $STATIC_COUNT"
+          echo "Dynamic URLs        : $DYNAMIC_COUNT"
+          echo "Unique URL params   : $UNFURLPARAMS_COUNT"
+          echo "httpx (alive URLs)  : $HTTPX_COUNT"
+          echo "x8 reflections lines: $X8_COUNT"
+          echo "kxss scan lines     : $KXSS_COUNT"
           if [[ -n "${{ inputs.headers }}" ]]; then
-            printf "%-22s: %s
-" "Headers used" "${{ inputs.headers }}"
+            echo "Headers used        : ${{ inputs.headers }}"
           fi
           echo "=================================================="
 
@@ -645,29 +636,19 @@ jobs:
           cp kxss-out.txt final-results/ || true
           cp kxss-reflected-pairs.txt final-results/ || true
 
-          # Save summary
+          # Save summary with echo instead of printf
           echo "============ Recon Summary for $DOMAIN ============" > final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "waybackurls" "$WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "gau" "$GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "All unique URLs" "$ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "Static URLs" "$STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "Dynamic URLs" "$DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "Unique URL params" "$UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "httpx (alive URLs)" "$HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "x8 reflections lines" "$X8_COUNT" >> final-results/FINAL_SUMMARY.txt
-          printf "%-22s: %d
-" "kxss scan lines" "$KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "waybackurls         : $WAYBACK_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "gau                 : $GAU_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "All unique URLs     : $ALLURLS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Static URLs         : $STATIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Dynamic URLs        : $DYNAMIC_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "Unique URL params   : $UNFURLPARAMS_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "httpx (alive URLs)  : $HTTPX_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "x8 reflections lines: $X8_COUNT" >> final-results/FINAL_SUMMARY.txt
+          echo "kxss scan lines     : $KXSS_COUNT" >> final-results/FINAL_SUMMARY.txt
           if [[ -n "${{ inputs.headers }}" ]]; then
-            printf "%-22s: %s
-" "Headers used" "${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
+            echo "Headers used        : ${{ inputs.headers }}" >> final-results/FINAL_SUMMARY.txt
           fi
           echo "==================================================" >> final-results/FINAL_SUMMARY.txt
 
