@@ -14,11 +14,12 @@ on:
         type: string
 
 jobs:
+  # Job 1: Run httpx on dynamic URLs (parallel chunks)
   httpx-scan:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Restore combined results
         uses: actions/cache@v4
@@ -30,39 +31,25 @@ jobs:
 
       - name: Install httpx with PATH fix
         run: |
+          echo "Installing httpx..."
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
           export PATH=$PATH:$(go env GOPATH)/bin
+          echo "Go PATH: $(go env GOPATH)"
+          echo "Current PATH: $PATH"
+          echo "httpx location: $(which httpx || echo 'not found in PATH')"
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-      - name: Run httpx on chunk (with debug)
+      - name: Run httpx on chunk
         run: |
-          echo "==== [httpx debug] WORKDIR ===="
-          pwd
-          ls -lah
-          echo "==== [httpx debug] Directory structure before processing ===="
-          find . -type d
-          echo "==== [httpx debug] All .txt files ===="
-          find . -type f -name '*.txt'
-          echo "==== [httpx debug] combined-results ===="
-          ls -lh combined-results/ || true
-          echo "==== [httpx debug] combined-results/dynamic-urls.txt ===="
-          wc -l combined-results/dynamic-urls.txt || true
-          head -10 combined-results/dynamic-urls.txt || true
-
           mkdir -p httpx-results-${{ matrix.chunk }}
           export PATH=$PATH:$(go env GOPATH)/bin
-
           if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
             TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 10 + 1))
+            LINES_PER_CHUNK=$((TOTAL_LINES / 8 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
-            echo "==== [httpx debug] chunk-${{ matrix.chunk }}.txt ===="
-            wc -l chunk-${{ matrix.chunk }}.txt || true
-            head -10 chunk-${{ matrix.chunk }}.txt || true
-
             if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
               echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < chunk-${{ matrix.chunk }}.txt) URLs"
               cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
@@ -75,14 +62,8 @@ jobs:
           else
             touch httpx-results-${{ matrix.chunk }}/httpx.txt
           fi
-
-          echo "==== [httpx debug] Output httpx-results-${{ matrix.chunk }}/httpx.txt ===="
-          wc -l httpx-results-${{ matrix.chunk }}/httpx.txt || true
-          head -10 httpx-results-${{ matrix.chunk }}/httpx.txt || true
           ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
           echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
-          echo "==== [httpx debug] TREE after httpx ===="
-          find . | sort
 
       - name: Cache httpx results
         uses: actions/cache@v4
@@ -90,12 +71,13 @@ jobs:
           path: httpx-results-${{ matrix.chunk }}/
           key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
 
+  # Job 2: Run x8 parameter bruteforce (parallel)
   x8-scan:
     needs: httpx-scan
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5]
+        chunk: [1, 2, 3, 4]
     steps:
       - name: Restore combined results
         uses: actions/cache@v4
@@ -108,10 +90,25 @@ jobs:
       - name: Restore all httpx results
         uses: actions/cache@v4
         with:
-          path: httpx-results/
-          key: httpx-results-*-${{ inputs.run_id }}
+          path: |
+            httpx-results-1/
+            httpx-results-2/
+            httpx-results-3/
+            httpx-results-4/
+            httpx-results-5/
+            httpx-results-6/
+            httpx-results-7/
+            httpx-results-8/
+          key: not-used
           restore-keys: |
-            httpx-results-
+            httpx-results-1-${{ inputs.run_id }}
+            httpx-results-2-${{ inputs.run_id }}
+            httpx-results-3-${{ inputs.run_id }}
+            httpx-results-4-${{ inputs.run_id }}
+            httpx-results-5-${{ inputs.run_id }}
+            httpx-results-6-${{ inputs.run_id }}
+            httpx-results-7-${{ inputs.run_id }}
+            httpx-results-8-${{ inputs.run_id }}
 
       - name: Install x8
         run: |
@@ -125,7 +122,7 @@ jobs:
             fi
           fi
           echo '#!/bin/bash' > /usr/local/bin/x8_fallback.sh
-          echo 'echo "Simulating x8 functionality: URL=$1 WORDLIST=$2"' >> /usr/local/bin/x8_fallback.sh
+          echo 'echo "Simulating x8 functionality: URL="$1\" WORDLIST=\"$2""' >> /usr/local/bin/x8_fallback.sh
           echo 'echo "Error: Fallback script executed. Real x8 not found. Please check installation."' >> /usr/local/bin/x8_fallback.sh
           chmod +x /usr/local/bin/x8_fallback.sh
           if ! command -v x8 >/dev/null 2>&1; then
@@ -136,37 +133,16 @@ jobs:
             echo "x8 found in PATH."
           fi
 
-      - name: Combine httpx results and run x8 (with debug)
+      - name: Combine httpx results and run x8
         run: |
-          echo "==== [x8 debug] WORKDIR ===="
-          pwd
-          ls -lh
-          echo "==== [x8 debug] Directory structure before combine ===="
-          find . -type d
-          echo "==== [x8 debug] All .txt files ===="
-          find . -type f -name '*.txt'
-          for f in $(find . -type f -name '*.txt'); do echo "=== $f ==="; head -10 $f; done
-
           mkdir -p x8-results-${{ matrix.chunk }}
-          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-httpx.txt || true
-          echo "---- [x8 debug] all-httpx.txt ----"
-          wc -l all-httpx.txt || true
-          head -10 all-httpx.txt || true
-          echo "---- [x8 debug] combined-results/unfurl-params.txt ----"
-          wc -l combined-results/unfurl-params.txt || true
-          head -10 combined-results/unfurl-params.txt || true
-
-          if [[ -s "all-httpx.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
-            TOTAL_LINES=$(wc -l < all-httpx.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 5 + 1))
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
+          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
-
-            echo "---- [x8 debug] x8-chunk-${{ matrix.chunk }}.txt ----"
-            wc -l x8-chunk-${{ matrix.chunk }}.txt || true
-            head -10 x8-chunk-${{ matrix.chunk }}.txt || true
-
+            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > x8-chunk-${{ matrix.chunk }}.txt
             if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
               if [[ -n "${{ inputs.headers }}" ]]; then
                 cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
@@ -174,19 +150,11 @@ jobs:
                 cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
               fi
             else
-              echo "---- [x8 debug] x8-chunk-${{ matrix.chunk }}.txt is empty; skipping x8 ----"
               touch x8-results-${{ matrix.chunk }}/x8.txt
             fi
           else
-            echo "---- [x8 debug] upstream input missing; skipping x8 ----"
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
-
-          echo "---- [x8 debug] Output x8-results-${{ matrix.chunk }}/x8.txt ----"
-          wc -l x8-results-${{ matrix.chunk }}/x8.txt || true
-          head -10 x8-results-${{ matrix.chunk }}/x8.txt || true
-          echo "==== [x8 debug] TREE after x8 ===="
-          find . | sort
 
       - name: Cache x8 results
         uses: actions/cache@v4
@@ -194,6 +162,7 @@ jobs:
           path: x8-results-${{ matrix.chunk }}/
           key: x8-results-${{ matrix.chunk }}-${{ inputs.run_id }}
 
+  # Job 3: Run kxss (parallel)
   kxss-scan:
     needs: httpx-scan
     runs-on: ubuntu-latest
@@ -212,47 +181,44 @@ jobs:
       - name: Restore all httpx results
         uses: actions/cache@v4
         with:
-          path: httpx-results/
-          key: httpx-results-*-${{ inputs.run_id }}
+          path: |
+            httpx-results-1/
+            httpx-results-2/
+            httpx-results-3/
+            httpx-results-4/
+            httpx-results-5/
+            httpx-results-6/
+            httpx-results-7/
+            httpx-results-8/
+          key: not-used
           restore-keys: |
-            httpx-results-
+            httpx-results-1-${{ inputs.run_id }}
+            httpx-results-2-${{ inputs.run_id }}
+            httpx-results-3-${{ inputs.run_id }}
+            httpx-results-4-${{ inputs.run_id }}
+            httpx-results-5-${{ inputs.run_id }}
+            httpx-results-6-${{ inputs.run_id }}
+            httpx-results-7-${{ inputs.run_id }}
+            httpx-results-8-${{ inputs.run_id }}
 
       - name: Install kxss
         run: |
           go install github.com/Emoe/kxss@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
-      - name: Generate kxss URLs and run scan (with debug)
+      - name: Generate kxss URLs and run scan
         run: |
-          echo "==== [kxss debug] WORKDIR ===="
-          pwd
-          ls -lh
-          echo "==== [kxss debug] Directory structure before combine ===="
-          find . -type d
-          echo "==== [kxss debug] All .txt files ===="
-          find . -type f -name '*.txt'
-          for f in $(find . -type f -name '*.txt'); do echo "=== $f ==="; head -10 $f; done
-
           mkdir -p kxss-results-${{ matrix.chunk }}
           export PATH=$PATH:$(go env GOPATH)/bin
-          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-httpx.txt || true
-          echo "---- [kxss debug] all-httpx.txt ----"
-          wc -l all-httpx.txt || true
-          head -10 all-httpx.txt || true
-          echo "---- [kxss debug] combined-results/unfurl-params.txt ----"
-          wc -l combined-results/unfurl-params.txt || true
-          head -10 combined-results/unfurl-params.txt || true
+          find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
 
-          if [[ -s "all-httpx.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
-            TOTAL_LINES=$(wc -l < all-httpx.txt)
+          if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            TOTAL_LINES=$(wc -l < dynamic-alive.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 6 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            sed -n "${START_LINE},${END_LINE}p" all-httpx.txt > kxss-urls-${{ matrix.chunk }}.txt
 
-            echo "---- [kxss debug] kxss-urls-${{ matrix.chunk }}.txt ----"
-            wc -l kxss-urls-${{ matrix.chunk }}.txt || true
-            head -10 kxss-urls-${{ matrix.chunk }}.txt || true
+            sed -n "${START_LINE},${END_LINE}p" dynamic-alive.txt > kxss-urls-${{ matrix.chunk }}.txt
 
             if [[ -s "kxss-urls-${{ matrix.chunk }}.txt" ]]; then
               echo "Running kxss for chunk ${{ matrix.chunk }}..."
@@ -267,33 +233,23 @@ jobs:
                 fi
               done | sort -u > kxss-urls-final-${{ matrix.chunk }}.txt
 
-              echo "---- [kxss debug] kxss-urls-final-${{ matrix.chunk }}.txt ----"
-              wc -l kxss-urls-final-${{ matrix.chunk }}.txt || true
-              head -10 kxss-urls-final-${{ matrix.chunk }}.txt || true
-
               if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
                 cat kxss-urls-final-${{ matrix.chunk }}.txt | kxss -timeout 300 -threads 50 > kxss-results-${{ matrix.chunk }}/kxss-output.txt || {
                   echo "kxss scan failed for chunk ${{ matrix.chunk }}"
                   touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
                 }
               else
-                echo "---- [kxss debug] kxss-urls-final is empty; skipping kxss ----"
                 touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
               fi
             else
-              echo "---- [kxss debug] kxss-urls-${{ matrix.chunk }}.txt is empty; skipping kxss ----"
               touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
             fi
           else
-            echo "---- [kxss debug] upstream input missing; skipping kxss ----"
             touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
           fi
 
-          echo "---- [kxss debug] Output kxss-results-${{ matrix.chunk }}/kxss-output.txt ----"
-          wc -l kxss-results-${{ matrix.chunk }}/kxss-output.txt || true
-          head -10 kxss-results-${{ matrix.chunk }}/kxss-output.txt || true
-          echo "==== [kxss debug] TREE after kxss ===="
-          find . | sort
+          KXSS_COUNT=$(wc -l < kxss-results-${{ matrix.chunk }}/kxss-output.txt)
+          echo "kxss found $KXSS_COUNT results for chunk ${{ matrix.chunk }}"
 
       - name: Cache kxss results
         uses: actions/cache@v4
