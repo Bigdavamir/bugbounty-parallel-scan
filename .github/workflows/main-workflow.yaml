@@ -1,0 +1,38 @@
+name: "Complete Bug Hunt Workflow"
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Target domain (e.g., example.com)'
+        required: true
+        type: string
+      headers:
+        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  url-gathering:
+    uses: ./.github/workflows/url-gathering.yaml
+    with:
+      domain: ${{ github.event.inputs.domain }}
+      headers: ${{ github.event.inputs.headers }}
+      run_id: ${{ github.run_id }}
+      
+  xss-tools:
+    needs: url-gathering
+    uses: ./.github/workflows/xss-tools.yaml
+    with:
+      domain: ${{ github.event.inputs.domain }}
+      headers: ${{ github.event.inputs.headers }}
+      run_id: ${{ github.run_id }}
+    
+  summary:
+    needs: xss-tools
+    uses: ./.github/workflows/xss-summary.yaml
+    with:
+      domain: ${{ github.event.inputs.domain }}
+      headers: ${{ github.event.inputs.headers }}
+      run_id: ${{ github.run_id }}
