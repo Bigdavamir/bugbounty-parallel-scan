@@ -3,32 +3,23 @@
           mkdir -p final-results
           DOMAIN="${{ inputs.domain }}"
 
+          # Collect all results
           find . -name "x8-results-*" -type d -exec cat {}/*.txt \; > all-x8-raw.txt || true
           find . -name "kxss-results-*" -type d -exec cat {}/*.txt \; > all-kxss-raw.txt || true
 
-          awk '
-          /^URL: .* Param: .* Unfiltered: / {
-            url_start = index($0, "URL: ") + 5
-            param_pos = index($0, " Param: ")
-            url = substr($0, url_start, param_pos - url_start)
+          # Parse kxss results with simple grep instead of awk
+          grep "URL:" all-kxss-raw.txt | grep "Param:" | grep "Unfiltered:" | grep -v "Unfiltered: \[\]" > all-kxss-reflections.txt || touch all-kxss-reflections.txt
 
-            param_start = param_pos + 8
-            unfilt_pos = index($0, " Unfiltered: ")
-            param = substr($0, param_start, unfilt_pos - param_start)
-
-            unfilt_start = unfilt_pos + 13
-            unfiltered = substr($0, unfilt_start)
-
-            if (unfiltered != "[]" && unfiltered != "" && url != "" && param != "") {
-              print url " | " param " | Unfiltered: " unfiltered
-            }
-          }
-          ' all-kxss-raw.txt > all-kxss-reflections.txt
-
+          # Parse x8 results  
           grep -E '^https?://[^[:space:]]+' all-x8-raw.txt > all-x8-reflections.txt 2>/dev/null || touch all-x8-reflections.txt
 
+          # Count function
           count_or_zero(){
-            [[ -f "$1" ]] && wc -l < "$1" || echo 0
+            if [[ -f "$1" ]]; then
+              wc -l < "$1"
+            else
+              echo 0
+            fi
           }
 
           WAYBACK_COUNT=$(count_or_zero url-collection-results/waybackurls.txt)
@@ -42,96 +33,86 @@
           KXSS_COUNT=$(count_or_zero all-kxss-reflections.txt)
           REFLECTED_COUNT=$(count_or_zero all-kxss-reflections.txt)
 
-          cat > final-results/FINAL_SUMMARY.txt << EOF
-============================================
-          DISTRIBUTED SCAN RESULTS
-============================================
+          # Create summary using printf
+          {
+            printf "============================================
+"
+            printf "          DISTRIBUTED SCAN RESULTS
+"
+            printf "============================================
 
-🌐 Domain: $DOMAIN
-📅 Date: \$(date)
-📊 Scan Type: Complete Security Assessment
+"
+            printf "Domain: %s
+" "$DOMAIN"
+            printf "Date: %s
+" "$(date)"
+            printf "Scan Type: Complete Security Assessment
 
-============================================
-              URL STATISTICS
-============================================
+"
+            printf "============================================
+"
+            printf "              URL STATISTICS
+" 
+            printf "============================================
 
-📂 Passive Collection:
-- Waybackurls found: $WAYBACK_COUNT URLs
-- GAU found: $GAU_COUNT URLs
+"
+            printf "Passive Collection:
+"
+            printf "   Waybackurls found: %d URLs
+" "$WAYBACK_COUNT"
+            printf "   GAU found: %d URLs
 
-🔍 URL Processing:
-- Total unique URLs: $ALLURLS_COUNT
-- Static URLs: $STATIC_COUNT  
-- Dynamic URLs: $DYNAMIC_COUNT
-- Alive URLs (httpx): $HTTPX_COUNT
-- Unique parameters: $PARAMS_COUNT
+" "$GAU_COUNT"
+            printf "URL Processing:
+"
+            printf "   Total unique URLs: %d
+" "$ALLURLS_COUNT"
+            printf "   Static URLs: %d
+" "$STATIC_COUNT"
+            printf "   Dynamic URLs: %d
+" "$DYNAMIC_COUNT"
+            printf "   Alive URLs (httpx): %d
+" "$HTTPX_COUNT"
+            printf "   Unique parameters: %d
 
-============================================
-           REFLECTION RESULTS  
-============================================
+" "$PARAMS_COUNT"
+            printf "============================================
+"
+            printf "           REFLECTION RESULTS
+"
+            printf "============================================
 
-🎯 Parameter Discovery:
-- x8 reflections: $X8_COUNT
-- kxss reflections: $KXSS_COUNT
+"
+            printf "Parameter Discovery:
+"
+            printf "   x8 reflections: %d
+" "$X8_COUNT"
+            printf "   kxss reflections: %d
 
-🔥 Reflected Parameters: $REFLECTED_COUNT
+" "$KXSS_COUNT"
+            printf "Reflected Parameters: %d
 
-============================================
-              FILES AVAILABLE
-============================================
+" "$REFLECTED_COUNT"
+            printf "============================================
+"
+          } > final-results/FINAL_SUMMARY.txt
 
-📁 URL Collections:
-- all-alive-urls.txt (Live URLs after httpx verification)
-- all-clean-urls.txt (All filtered URLs)
-- dynamic-urls.txt (URLs with parameters)  
-- static-urls.txt (URLs without parameters)
-- params.txt (Unique parameter names)
-
-🔍 Reflection Results:
-- all-x8-reflections.txt (x8 discovered parameters)
-- all-kxss-reflections.txt (kxss reflection results)
-- all-x8-raw.txt (Raw x8 output)
-- all-kxss-raw.txt (Raw kxss output)
-
-============================================
-              NEXT STEPS
-============================================
-
-1. Review reflected parameters in all-kxss-reflections.txt
-2. Test x8 discoveries in all-x8-reflections.txt  
-3. Manual verification of promising endpoints
-4. Advanced payload testing on reflected parameters
-EOF
-
+          # Copy all result files
           cp all-* final-results/ 2>/dev/null || true
 
-          indent="    "
-          echo "============================================" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "              SUMMARY STATISTICS            " | tee -a final-results/FINAL_SUMMARY.txt  
-          echo "============================================" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Domain: $DOMAIN" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Wayback URLs: $WAYBACK_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}GAU URLs: $GAU_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Total URLs: $ALLURLS_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Static URLs: $STATIC_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Dynamic URLs: $DYNAMIC_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Alive URLs: $HTTPX_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Unique parameters: $PARAMS_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}x8 reflections Lines: $X8_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}kxss scan Lines: $KXSS_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-          echo "${indent}Reflected pairs: $REFLECTED_COUNT" | tee -a final-results/FINAL_SUMMARY.txt
-
+          # Show first few reflected pairs if any
           if [[ -s "all-kxss-reflections.txt" ]]; then
-            echo "" | tee -a final-results/FINAL_SUMMARY.txt
-            echo "🔥 First 5 reflected pairs:" | tee -a final-results/FINAL_SUMMARY.txt
-            head -5 "all-kxss-reflections.txt" | tee -a final-results/FINAL_SUMMARY.txt
+            printf "
+First 5 reflected pairs:
+" >> final-results/FINAL_SUMMARY.txt
+            head -5 "all-kxss-reflections.txt" >> final-results/FINAL_SUMMARY.txt
           else
-            echo "❌ No reflected pairs found" | tee -a final-results/FINAL_SUMMARY.txt
+            printf "
+No reflected pairs found
+" >> final-results/FINAL_SUMMARY.txt
           fi
 
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            echo "" | tee -a final-results/FINAL_SUMMARY.txt
-            echo "${indent}Headers used: ${{ inputs.headers }}" | tee -a final-results/FINAL_SUMMARY.txt
-          fi
-          
-          echo "============================================" | tee -a final-results/FINAL_SUMMARY.txt
+          printf "============================================
+" >> final-results/FINAL_SUMMARY.txt
+
+          echo "Summary generated successfully"
