@@ -1,10 +1,10 @@
-name: Simple Run main.sh
+name: Parallel BugHunt
 
 on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Target domain'
+        description: 'Target domain (for example: example.com)'
         required: true
 
 jobs:
@@ -18,24 +18,53 @@ jobs:
       - name: Set script permissions
         run: chmod +x main.sh
 
-      - name: Install golang
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
       - name: Install required tools
         run: |
-          go install github.com/hakluke/waybackurls@latest
-          go install github.com/lc/gau/v2/cmd/gau@latest
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          go install github.com/Sh1Yo/x8@latest
-          go install github.com/Emoe/kxss@latest
-          go install github.com/tomnomnom/unfurl@latest
-          go install github.com/tomnomnom/anew@latest
-          export PATH=$PATH:$(go env GOPATH)/bin
-          echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> $GITHUB_ENV
+          # Install waybackurls
+          wget -q -O /usr/local/bin/waybackurls https://github.com/hakluke/waybackurls/releases/latest/download/waybackurls-linux-amd64
+          chmod +x /usr/local/bin/waybackurls
 
-      - name: Run bash script
+          # Install gau
+          wget -q -O /usr/local/bin/gau https://github.com/lc/gau/releases/latest/download/gau-linux-amd64
+          chmod +x /usr/local/bin/gau
+
+          # Install httpx
+          wget -q -O /usr/local/bin/httpx https://github.com/projectdiscovery/httpx/releases/latest/download/httpx-linux-amd64
+          chmod +x /usr/local/bin/httpx
+
+          # Install x8
+          wget -q -O /usr/local/bin/x8 https://github.com/Sh1Yo/x8/releases/latest/download/x8_linux_amd64
+          chmod +x /usr/local/bin/x8
+
+          # Install kxss
+          wget -q -O /usr/local/bin/kxss https://github.com/Emoe/kxss/releases/latest/download/kxss-linux-amd64
+          chmod +x /usr/local/bin/kxss
+
+          # Install unfurl
+          wget -q -O /usr/local/bin/unfurl https://github.com/tomnomnom/unfurl/releases/latest/download/unfurl-linux-amd64
+          chmod +x /usr/local/bin/unfurl
+
+          # Install anew
+          wget -q -O /usr/local/bin/anew https://github.com/tomnomnom/anew/releases/latest/download/anew-linux-amd64
+          chmod +x /usr/local/bin/anew
+
+          # Install jq, moreutils for helpers (required by some scripts)
+          sudo apt update
+          sudo apt install -y jq moreutils
+
+      - name: Check installed tools (diagnose)
         run: |
-          export PATH=$PATH:$(go env GOPATH)/bin
-          ./main.sh ${{ github.event.inputs.domain }}
+          for tool in waybackurls gau httpx x8 kxss unfurl anew jq; do
+            which $tool || (echo "$tool NOT FOUND!" && exit 1)
+          done
+          echo "All tools installed."
+
+      - name: Run bug bounty main.sh
+        run: |
+          ./main.sh "${{ github.event.inputs.domain }}"
+
+      - name: Upload result (Recon Output)
+        uses: actions/upload-artifact@v4
+        with:
+          name: recon-output
+          path: ${{ github.event.inputs.domain }}_recon/
