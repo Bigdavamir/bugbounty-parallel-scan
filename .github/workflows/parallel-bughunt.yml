@@ -20,97 +20,55 @@ jobs:
           sudo apt update
           sudo apt install -y jq moreutils gzip tar unzip curl wget
 
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
       - name: Install bugbounty tools (all from release)
         run: |
           set -e
           
           BIN_DIR="/usr/local/bin"
-          TEMP_DIR="/tmp/bugbounty_tools"
-          mkdir -p "$TEMP_DIR"
-          cd "$TEMP_DIR"
-
+          
           echo "Installing waybackurls..."
-          WAYBACK_VER=$(curl -s https://api.github.com/repos/tomnomnom/waybackurls/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/tomnomnom/waybackurls/releases/download/${WAYBACK_VER}/waybackurls_linux_amd64" -o waybackurls
-          chmod +x waybackurls && sudo mv waybackurls $BIN_DIR/
+          go install github.com/tomnomnom/waybackurls@latest
+          sudo cp ~/go/bin/waybackurls $BIN_DIR/
 
           echo "Installing anew..."
-          ANEW_VER=$(curl -s https://api.github.com/repos/tomnomnom/anew/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/tomnomnom/anew/releases/download/${ANEW_VER}/anew_linux_amd64" -o anew
-          chmod +x anew && sudo mv anew $BIN_DIR/
+          go install github.com/tomnomnom/anew@latest
+          sudo cp ~/go/bin/anew $BIN_DIR/
 
           echo "Installing unfurl..."
-          UNFURL_VER=$(curl -s https://api.github.com/repos/tomnomnom/unfurl/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/tomnomnom/unfurl/releases/download/${UNFURL_VER}/unfurl_linux_amd64" -o unfurl
-          chmod +x unfurl && sudo mv unfurl $BIN_DIR/
+          go install github.com/tomnomnom/unfurl@latest
+          sudo cp ~/go/bin/unfurl $BIN_DIR/
 
           echo "Installing kxss..."
-          KXSS_VER=$(curl -s https://api.github.com/repos/tomnomnom/kxss/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/tomnomnom/kxss/releases/download/${KXSS_VER}/kxss_linux_amd64" -o kxss
-          chmod +x kxss && sudo mv kxss $BIN_DIR/
+          go install github.com/tomnomnom/kxss@latest
+          sudo cp ~/go/bin/kxss $BIN_DIR/
 
           echo "Installing gau..."
-          GAU_VER=$(curl -s https://api.github.com/repos/lc/gau/releases/latest | jq -r '.tag_name')
-          echo "GAU version: $GAU_VER"
-          curl -sL "https://github.com/lc/gau/releases/download/${GAU_VER}/gau_${GAU_VER}_linux_amd64.tar.gz" -o gau.tar.gz
-          if [ -f gau.tar.gz ]; then
-            tar -xzf gau.tar.gz --wildcards "*/gau" --strip-components=1 2>/dev/null || tar -xzf gau.tar.gz gau 2>/dev/null || { echo "Extracting gau binary directly..."; tar -xzf gau.tar.gz; find . -name "gau" -type f -exec cp {} gau \; ; }
-            chmod +x gau && sudo mv gau $BIN_DIR/
-            rm -f gau.tar.gz
-          else
-            echo "Failed to download gau, trying alternative method..."
-            curl -sL "https://github.com/lc/gau/releases/download/${GAU_VER}/gau_linux_amd64" -o gau || {
-              echo "Alternative download failed, installing from source..."
-              curl -sL "https://github.com/lc/gau/archive/refs/tags/${GAU_VER}.tar.gz" -o gau-source.tar.gz
-              tar -xzf gau-source.tar.gz
-              cd gau-*
-              go build -o gau .
-              sudo mv gau $BIN_DIR/
-              cd ..
-              rm -rf gau-*
-            }
-            if [ -f gau ]; then
-              chmod +x gau && sudo mv gau $BIN_DIR/
-            fi
-          fi
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          sudo cp ~/go/bin/gau $BIN_DIR/
 
           echo "Installing httpx..."
-          HTTPX_VER=$(curl -s https://api.github.com/repos/projectdiscovery/httpx/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/projectdiscovery/httpx/releases/download/${HTTPX_VER}/httpx_${HTTPX_VER}_linux_amd64.zip" -o httpx.zip
-          unzip -q httpx.zip httpx
-          chmod +x httpx && sudo mv httpx $BIN_DIR/
-          rm -f httpx.zip
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          sudo cp ~/go/bin/httpx $BIN_DIR/
 
           echo "Installing x8..."
           X8_VER=$(curl -s https://api.github.com/repos/Sh1Yo/x8/releases/latest | jq -r '.tag_name')
-          curl -sL "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o x8
-          chmod +x x8 && sudo mv x8 $BIN_DIR/
+          curl -sL "https://github.com/Sh1Yo/x8/releases/download/${X8_VER}/x8_linux_amd64" -o /tmp/x8
+          chmod +x /tmp/x8 && sudo mv /tmp/x8 $BIN_DIR/
 
-          # Cleanup temp directory
-          cd /
-          rm -rf "$TEMP_DIR"
-          
           # Verify installations
           echo "Verifying installations..."
-          which waybackurls && echo "✓ waybackurls installed" || echo "✗ waybackurls failed"
-          which anew && echo "✓ anew installed" || echo "✗ anew failed"
-          which unfurl && echo "✓ unfurl installed" || echo "✗ unfurl failed"
-          which kxss && echo "✓ kxss installed" || echo "✗ kxss failed"
-          which gau && echo "✓ gau installed" || echo "✗ gau failed"
-          which httpx && echo "✓ httpx installed" || echo "✗ httpx failed"
-          which x8 && echo "✓ x8 installed" || echo "✗ x8 failed"
-
-      - name: Install Go (fallback for gau)
-        if: failure()
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.21'
-
-      - name: Install gau from source (fallback)
-        if: failure()
-        run: |
-          go install github.com/lc/gau/v2/cmd/gau@latest
-          sudo cp ~/go/bin/gau /usr/local/bin/
+          waybackurls --help >/dev/null && echo "✓ waybackurls installed" || echo "✗ waybackurls failed"
+          anew --help >/dev/null && echo "✓ anew installed" || echo "✗ anew failed"
+          unfurl --help >/dev/null && echo "✓ unfurl installed" || echo "✗ unfurl failed"
+          kxss --help >/dev/null && echo "✓ kxss installed" || echo "✗ kxss failed"
+          gau --help >/dev/null && echo "✓ gau installed" || echo "✗ gau failed"
+          httpx --help >/dev/null && echo "✓ httpx installed" || echo "✗ httpx failed"
+          x8 --help >/dev/null && echo "✓ x8 installed" || echo "✗ x8 failed"
 
       - name: Make main.sh executable
         run: chmod +x main.sh
