@@ -30,8 +30,7 @@ jobs:
         with:
           path: httpx-results/
           key: httpx-results-*-${{ inputs.run_id }}
-          restore-keys: |
-            httpx-results-
+          restore-keys: httpx-results-
 
       - name: Restore x8 results
         uses: actions/cache@v3
@@ -66,7 +65,6 @@ jobs:
           # Parse kxss output for reflected pairs
           if ls kxss-results/*/kxss-output.txt 1> /dev/null 2>&1; then
             echo "Parsing kxss output for reflected parameters..."
-            # Assuming kxss output format is: URL | PARAM | Reflected: VALUE
             grep -E '^.*\|.*=KXSS' kxss-results/*/kxss-output.txt | awk -F '|' '{gsub(/^[  ]+|[  ]+$/, "", $2); print $1 " | " $2}' | sort -u > final-results/kxss-reflected-pairs.txt
           else
             touch final-results/kxss-reflected-pairs.txt
