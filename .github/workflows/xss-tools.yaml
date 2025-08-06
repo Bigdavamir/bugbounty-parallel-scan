@@ -5,6 +5,10 @@ on:
     workflows: ["Parallel Bug Hunt - Part1"] # نام workflow اول
     types: [completed]
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   # Job 1: Run httpx on dynamic URLs (parallel chunks)
   httpx-scan:
@@ -22,6 +26,7 @@ jobs:
           workflow_conclusion: success
           name: combined-results
           path: combined-results/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install httpx with PATH fix
         run: |
@@ -82,6 +87,7 @@ jobs:
           workflow_conclusion: success
           name: combined-results
           path: combined-results/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all httpx results
         uses: actions/download-artifact@v4
@@ -160,6 +166,7 @@ jobs:
           workflow_conclusion: success
           name: combined-results
           path: combined-results/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download all httpx results
         uses: actions/download-artifact@v4
