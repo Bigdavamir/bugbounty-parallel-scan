@@ -1,142 +1,3 @@
-name: 2 Security Scanning
-
-on:
-  workflow_dispatch:
-    inputs:
-      domain:
-        description: 'Target domain (e.g., example.com)'
-        required: true
-        type: string
-      headers:
-        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
-        required: false
-        type: string
-        default: ''
-
-jobs:
-  x8-scan:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        chunk: [1, 2, 3, 4]
-    steps:
-      - name: Download URL collection results
-        uses: actions/download-artifact@v4
-        with:
-          name: url-collection-results
-          path: url-collection-results/
-
-      - name: Install x8
-        run: |
-          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8
-          chmod +x x8
-          sudo mv x8 /usr/local/bin/
-
-      - name: Run x8 parameter discovery
-        run: |
-          mkdir -p x8-results-${{ matrix.chunk }}
-          
-          if [[ -s "url-collection-results/all-alive-urls.txt" ]] && [[ -s "url-collection-results/params.txt" ]]; then
-            TOTAL_LINES=$(wc -l < url-collection-results/all-alive-urls.txt)
-            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
-            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
-            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-
-            sed -n "${START_LINE},${END_LINE}p" url-collection-results/all-alive-urls.txt > x8-chunk-${{ matrix.chunk }}.txt
-
-            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
-              if [[ -n "${{ inputs.headers }}" ]]; then
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w url-collection-results/params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
-              else
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w url-collection-results/params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
-              fi
-            else
-              touch x8-results-${{ matrix.chunk }}/x8.txt
-            fi
-          else
-            touch x8-results-${{ matrix.chunk }}/x8.txt
-          fi
-
-      - name: Upload x8 results
-        uses: actions/upload-artifact@v4
-        with:
-          name: x8-results-${{ matrix.chunk }}
-          path: x8-results-${{ matrix.chunk }}/
-
-  kxss-scan:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        chunk: [1, 2, 3, 4, 5, 6]
-    steps:
-      - name: Download URL collection results
-        uses: actions/download-artifact@v4
-        with:
-          name: url-collection-results
-          path: url-collection-results/
-
-      - name: Install kxss
-        run: |
-          go install github.com/Emoe/kxss@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: Generate kxss URLs and run scan
-        run: |
-          mkdir -p kxss-results-${{ matrix.chunk }}
-          export PATH=$PATH:$(go env GOPATH)/bin
-
-          echo "https://1.bigdav.ir/test.php?test=KXSS" > kxss-urls-${{ matrix.chunk }}.txt
-
-          if [[ -s "url-collection-results/all-alive-urls.txt" ]] && [[ -s "url-collection-results/params.txt" ]]; then
-            mapfile -t urls < <(sort -u url-collection-results/all-alive-urls.txt)
-            mapfile -t params < <(sort -u url-collection-results/params.txt)
-
-            TOTAL_COMBINATIONS=$((${#urls[@]} * ${#params[@]}))
-            COMBINATIONS_PER_CHUNK=$((TOTAL_COMBINATIONS / 6 + 1))
-            START_COMBINATION=$((((${{ matrix.chunk }} - 1) * COMBINATIONS_PER_CHUNK) + 1))
-            END_COMBINATION=$((${{ matrix.chunk }} * COMBINATIONS_PER_CHUNK))
-
-            combination_count=0
-            for url in "${urls[@]}"; do
-              for param in "${params[@]}"; do
-                ((combination_count++))
-                if [[ $combination_count -ge $START_COMBINATION ]] && [[ $combination_count -le $END_COMBINATION ]]; then
-                  if [[ "$url" == *"?${param}="* ]]; then
-                    echo "$url" | sed "s/${param}=[^&]*/${param}=KXSS/" >> kxss-urls-${{ matrix.chunk }}.txt
-                  elif [[ "$url" == *\?* ]]; then
-                    echo "${url}&${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
-                  else
-                    echo "${url}?${param}=KXSS" >> kxss-urls-${{ matrix.chunk }}.txt
-                  fi
-                fi
-              done
-            done
-          fi
-
-          sort -u kxss-urls-${{ matrix.chunk }}.txt > kxss-urls-final-${{ matrix.chunk }}.txt
-
-          if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
-            timeout 300 kxss < kxss-urls-final-${{ matrix.chunk }}.txt > kxss-results-${{ matrix.chunk }}/kxss.txt || true
-          else
-            touch kxss-results-${{ matrix.chunk }}/kxss.txt
-          fi
-
-      - name: Upload kxss results
-        uses: actions/upload-artifact@v4
-        with:
-          name: kxss-results-${{ matrix.chunk }}
-          path: kxss-results-${{ matrix.chunk }}/
-
-  final-summary:
-    needs: [x8-scan, kxss-scan]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all results
-        uses: actions/download-artifact@v4
-        with:
-          pattern: "*"
-          merge-multiple: true
-
       - name: Generate final summary
         run: |
           mkdir -p final-results
@@ -170,7 +31,6 @@ jobs:
             [[ -f "$1" ]] && wc -l < "$1" || echo 0
           }
 
-          DOMAIN="${{ inputs.domain }}"
           WAYBACK_COUNT=$(count_or_zero url-collection-results/waybackurls.txt)
           GAU_COUNT=$(count_or_zero url-collection-results/gau.txt)
           ALLURLS_COUNT=$(count_or_zero url-collection-results/all-clean-urls.txt)
@@ -183,66 +43,65 @@ jobs:
           REFLECTED_COUNT=$(count_or_zero all-kxss-reflections.txt)
 
           cat > final-results/FINAL_SUMMARY.txt << EOF
-          ============================================
-                    DISTRIBUTED SCAN RESULTS
-          ============================================
+============================================
+          DISTRIBUTED SCAN RESULTS
+============================================
 
-          🌐 Domain: $DOMAIN
-          📅 Date: $(date)
-          📊 Scan Type: Complete Security Assessment
+🌐 Domain: $DOMAIN
+📅 Date: \$(date)
+📊 Scan Type: Complete Security Assessment
 
-          ============================================
-                        URL STATISTICS
-          ============================================
+============================================
+              URL STATISTICS
+============================================
 
-          📂 Passive Collection:
+📂 Passive Collection:
 - Waybackurls found: $WAYBACK_COUNT URLs
 - GAU found: $GAU_COUNT URLs
 
-          🔍 URL Processing:
+🔍 URL Processing:
 - Total unique URLs: $ALLURLS_COUNT
 - Static URLs: $STATIC_COUNT  
 - Dynamic URLs: $DYNAMIC_COUNT
 - Alive URLs (httpx): $HTTPX_COUNT
 - Unique parameters: $PARAMS_COUNT
 
-          ============================================
-                     REFLECTION RESULTS  
-          ============================================
+============================================
+           REFLECTION RESULTS  
+============================================
 
-          🎯 Parameter Discovery:
+🎯 Parameter Discovery:
 - x8 reflections: $X8_COUNT
 - kxss reflections: $KXSS_COUNT
 
-          🔥 Reflected Parameters: $REFLECTED_COUNT
+🔥 Reflected Parameters: $REFLECTED_COUNT
 
-          ============================================
-                        FILES AVAILABLE
-          ============================================
+============================================
+              FILES AVAILABLE
+============================================
 
-          📁 URL Collections:
+📁 URL Collections:
 - all-alive-urls.txt (Live URLs after httpx verification)
 - all-clean-urls.txt (All filtered URLs)
 - dynamic-urls.txt (URLs with parameters)  
 - static-urls.txt (URLs without parameters)
 - params.txt (Unique parameter names)
 
-          🔍 Reflection Results:
+🔍 Reflection Results:
 - all-x8-reflections.txt (x8 discovered parameters)
 - all-kxss-reflections.txt (kxss reflection results)
 - all-x8-raw.txt (Raw x8 output)
 - all-kxss-raw.txt (Raw kxss output)
 
-          ============================================
-                        NEXT STEPS
-          ============================================
+============================================
+              NEXT STEPS
+============================================
 
-          1. Review reflected parameters in all-kxss-reflections.txt
-          2. Test x8 discoveries in all-x8-reflections.txt  
-          3. Manual verification of promising endpoints
-          4. Advanced payload testing on reflected parameters
-
-          EOF
+1. Review reflected parameters in all-kxss-reflections.txt
+2. Test x8 discoveries in all-x8-reflections.txt  
+3. Manual verification of promising endpoints
+4. Advanced payload testing on reflected parameters
+EOF
 
           cp all-* final-results/ 2>/dev/null || true
 
@@ -276,9 +135,3 @@ jobs:
           fi
           
           echo "============================================" | tee -a final-results/FINAL_SUMMARY.txt
-
-      - name: Upload final summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-scan-results
-          path: final-results/
