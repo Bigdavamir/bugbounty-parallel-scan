@@ -37,12 +37,21 @@ jobs:
 
       - name: Run httpx on chunk (with debug)
         run: |
-          mkdir -p httpx-results-${{ matrix.chunk }}
-          export PATH=$PATH:$(go env GOPATH)/bin
-          echo "==== [httpx debug] combined-results/dynamic-urls.txt ===="
+          echo "==== [httpx debug] WORKDIR ===="
+          pwd
+          ls -lah
+          echo "==== [httpx debug] Directory structure before processing ===="
+          find . -type d
+          echo "==== [httpx debug] All .txt files ===="
+          find . -type f -name '*.txt'
+          echo "==== [httpx debug] combined-results ===="
           ls -lh combined-results/ || true
+          echo "==== [httpx debug] combined-results/dynamic-urls.txt ===="
           wc -l combined-results/dynamic-urls.txt || true
           head -10 combined-results/dynamic-urls.txt || true
+
+          mkdir -p httpx-results-${{ matrix.chunk }}
+          export PATH=$PATH:$(go env GOPATH)/bin
 
           if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
             TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
@@ -72,6 +81,8 @@ jobs:
           head -10 httpx-results-${{ matrix.chunk }}/httpx.txt || true
           ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
           echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
+          echo "==== [httpx debug] TREE after httpx ===="
+          find . | sort
 
       - name: Cache httpx results
         uses: actions/cache@v4
@@ -127,6 +138,15 @@ jobs:
 
       - name: Combine httpx results and run x8 (with debug)
         run: |
+          echo "==== [x8 debug] WORKDIR ===="
+          pwd
+          ls -lh
+          echo "==== [x8 debug] Directory structure before combine ===="
+          find . -type d
+          echo "==== [x8 debug] All .txt files ===="
+          find . -type f -name '*.txt'
+          for f in $(find . -type f -name '*.txt'); do echo "=== $f ==="; head -10 $f; done
+
           mkdir -p x8-results-${{ matrix.chunk }}
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-httpx.txt || true
           echo "---- [x8 debug] all-httpx.txt ----"
@@ -165,6 +185,8 @@ jobs:
           echo "---- [x8 debug] Output x8-results-${{ matrix.chunk }}/x8.txt ----"
           wc -l x8-results-${{ matrix.chunk }}/x8.txt || true
           head -10 x8-results-${{ matrix.chunk }}/x8.txt || true
+          echo "==== [x8 debug] TREE after x8 ===="
+          find . | sort
 
       - name: Cache x8 results
         uses: actions/cache@v4
@@ -202,6 +224,15 @@ jobs:
 
       - name: Generate kxss URLs and run scan (with debug)
         run: |
+          echo "==== [kxss debug] WORKDIR ===="
+          pwd
+          ls -lh
+          echo "==== [kxss debug] Directory structure before combine ===="
+          find . -type d
+          echo "==== [kxss debug] All .txt files ===="
+          find . -type f -name '*.txt'
+          for f in $(find . -type f -name '*.txt'); do echo "=== $f ==="; head -10 $f; done
+
           mkdir -p kxss-results-${{ matrix.chunk }}
           export PATH=$PATH:$(go env GOPATH)/bin
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | sort -u > all-httpx.txt || true
@@ -261,6 +292,8 @@ jobs:
           echo "---- [kxss debug] Output kxss-results-${{ matrix.chunk }}/kxss-output.txt ----"
           wc -l kxss-results-${{ matrix.chunk }}/kxss-output.txt || true
           head -10 kxss-results-${{ matrix.chunk }}/kxss-output.txt || true
+          echo "==== [kxss debug] TREE after kxss ===="
+          find . | sort
 
       - name: Cache kxss results
         uses: actions/cache@v4
