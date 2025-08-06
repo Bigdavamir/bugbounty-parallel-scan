@@ -183,7 +183,7 @@ jobs:
           echo "https://api.${DOMAIN}/v1/users?limit=10" >> gau-results/gau.txt
 
       - name: Cache gau results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: gau-results/
           key: gau-results-${{ inputs.run_id }}
@@ -194,7 +194,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Restore wayback results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: passive-wayback/
           key: wayback-results-${{ inputs.run_id }}
@@ -202,7 +202,7 @@ jobs:
             wayback-results-
 
       - name: Restore gau results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: passive-gau/
           key: gau-results-${{ inputs.run_id }}
@@ -309,7 +309,7 @@ jobs:
           echo "Found $DYNAMIC dynamic URLs, $TOTAL total URLs"
 
       - name: Cache combined results
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: combined-results/
           key: combined-results-${{ inputs.run_id }}
