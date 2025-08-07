@@ -1,26 +1,160 @@
-kxss-scan:
+name: XSS Tools Execution
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        required: true
+        type: string
+      headers:
+        required: false
+        type: string
+      run_id:
+        required: true
+        type: string
+
+jobs:
+  httpx-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download combined results
+        uses: actions/download-artifact@v4
+        with:
+          name: combined-results
+          path: combined-results/
+        continue-on-error: true
+        
+      - name: Install httpx
+        run: |
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      
+      - name: Run httpx on chunk
+        run: |
+          mkdir -p httpx-results-${{ matrix.chunk }}
+          
+          if [[ -f "combined-results/dynamic-urls.txt" ]] && [[ -s "combined-results/dynamic-urls.txt" ]]; then
+            TOTAL_LINES=$(wc -l < combined-results/dynamic-urls.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 8 + 1))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+            
+            sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
+            
+            if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
+              echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < chunk-${{ matrix.chunk }}.txt) URLs"
+              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
+                echo "httpx failed for chunk ${{ matrix.chunk }}, using input URLs as fallback"
+                cp chunk-${{ matrix.chunk }}.txt httpx-results-${{ matrix.chunk }}/httpx.txt
+              }
+            else
+              echo "No URLs for this chunk, creating empty output"
+              touch httpx-results-${{ matrix.chunk }}/httpx.txt
+            fi
+          else
+            echo "dynamic-urls.txt not found or empty, creating empty output"
+            touch httpx-results-${{ matrix.chunk }}/httpx.txt
+          fi
+          
+          ALIVE_COUNT=$(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)
+          echo "Chunk ${{ matrix.chunk }} found $ALIVE_COUNT alive URLs"
+          
+          # Create a marker file to verify this job completed successfully
+          echo "Job completed" > httpx-results-${{ matrix.chunk }}/job_completed.marker
+
+      - name: Debug httpx output
+        run: |
+          echo "==== httpx-results-${{ matrix.chunk }} content ===="
+          ls -la httpx-results-${{ matrix.chunk }}/
+          echo "==== httpx.txt preview ===="
+          head -10 httpx-results-${{ matrix.chunk }}/httpx.txt || true
+          echo "Total lines: $(wc -l < httpx-results-${{ matrix.chunk }}/httpx.txt)"
+
+      # Upload each chunk result as a separate artifact
+      - name: Upload httpx results
+        uses: actions/upload-artifact@v4
+        with:
+          name: httpx-results-${{ matrix.chunk }}
+          path: httpx-results-${{ matrix.chunk }}/
+          retention-days: 1
+          if-no-files-found: warn
+
+  consolidate-httpx:
+    needs: httpx-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create output directories
+        run: |
+          mkdir -p consolidated-httpx-results
+          mkdir -p downloaded-httpx-results
+
+      # Download all httpx chunks
+      - name: Download all httpx results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: httpx-results-*
+          path: downloaded-httpx-results
+          merge-multiple: true
+
+      - name: Download combined results
+        uses: actions/download-artifact@v4
+        with:
+          name: combined-results
+          path: combined-results/
+        continue-on-error: true
+
+      - name: Consolidate httpx results
+        run: |
+          echo "==== Listing downloaded httpx results ===="
+          find downloaded-httpx-results -type f | sort
+          
+          # Consolidate all httpx.txt files
+          if find downloaded-httpx-results -name "httpx.txt" -type f 2>/dev/null | grep -q .; then
+            echo "Consolidating httpx results from all chunks"
+            cat downloaded-httpx-results/*/httpx.txt > consolidated-httpx-results/all-httpx.txt
+          else
+            echo "No httpx results found, attempting to use dynamic-urls.txt as fallback"
+            if [[ -f "combined-results/dynamic-urls.txt" ]]; then
+              echo "Using dynamic-urls.txt as fallback"
+              # Only grab URLs with parameters for XSS testing
+              grep '?' combined-results/dynamic-urls.txt > consolidated-httpx-results/all-httpx.txt || true
+            else
+              echo "No fallback source available, creating empty file"
+              touch consolidated-httpx-results/all-httpx.txt
+            fi
+          fi
+          
+          echo "==== Consolidated httpx results preview ===="
+          head -10 consolidated-httpx-results/all-httpx.txt || true
+          echo "Total consolidated URLs: $(wc -l < consolidated-httpx-results/all-httpx.txt)"
+
+      # Upload consolidated results as an artifact
+      - name: Upload consolidated httpx results
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-httpx-results
+          path: consolidated-httpx-results/
+          retention-days: 1
+          if-no-files-found: warn
+
+  x8-scan:
     needs: consolidate-httpx
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [1, 2, 3, 4, 5, 6]
+        chunk: [1, 2, 3, 4]
     steps:
-      # Try to get data from artifact first
       - name: Download consolidated httpx results
         uses: actions/download-artifact@v4
         with:
           name: consolidated-httpx-results
           path: consolidated-httpx-results/
-
-      # Fallback to cache if artifact download failed
-      - name: Restore consolidated httpx results from cache (backup)
-        uses: actions/cache@v4
-        with:
-          path: consolidated-httpx-results/
-          key: consolidated-httpx-results-${{ inputs.run_id }}
-          restore-keys: |
-            consolidated-httpx-results-
-        continue-on-error: true
 
       - name: Download combined results
         uses: actions/download-artifact@v4
@@ -40,71 +174,123 @@ kxss-scan:
             echo "all-httpx.txt file not found"
           fi
           
-          # Check for unfurl-params.txt
-          if [ -f "consolidated-httpx-results/unfurl-params.txt" ]; then
-            echo "unfurl-params.txt exists with $(wc -l < consolidated-httpx-results/unfurl-params.txt) lines"
-            head -5 consolidated-httpx-results/unfurl-params.txt
-          elif [ -f "combined-results/unfurl-params.txt" ]; then
-            echo "unfurl-params.txt found in combined-results with $(wc -l < combined-results/unfurl-params.txt) lines"
-            head -5 combined-results/unfurl-params.txt
-            # Copy to consolidated results for consistency
-            cp combined-results/unfurl-params.txt consolidated-httpx-results/
+          echo "==== combined-results content ===="
+          find combined-results -type f -exec ls -l {} \; || echo "No combined results found"
+
+      - name: Install x8
+        run: |
+          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && command -v x8 && echo "x8 installed via direct download" && exit 0 || echo "Direct download failed, trying cargo..."
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          source "$HOME/.cargo/env"
+          cargo install x8 && echo "x8 installed via cargo" && exit 0 || echo "Cargo install failed, trying build from source..."
+          if command -v go >/dev/null 2>&1; then
+            if ! command -v x8 >/dev/null 2>&1; then
+              echo "Building from source failed. Creating a fallback script..."
+            fi
+          fi
+          echo '#!/bin/bash' > /usr/local/bin/x8_fallback.sh
+          echo 'echo "Simulating x8 functionality: URL="$1" WORDLIST="$2"' >> /usr/local/bin/x8_fallback.sh
+          echo 'echo "Error: Fallback script executed. Real x8 not found. Please check installation."' >> /usr/local/bin/x8_fallback.sh
+          chmod +x /usr/local/bin/x8_fallback.sh
+          if ! command -v x8 >/dev/null 2>&1; then
+              echo "x8 not found, using fallback script via alias."
+              echo "alias x8='/usr/local/bin/x8_fallback.sh'" >> $GITHUB_ENV
+              export PATH=$PATH:/usr/local/bin
           else
-            echo "unfurl-params.txt not found in any location"
+            echo "x8 found in PATH."
           fi
 
-      # Install both httpx and kxss with better error handling
-      - name: Install tools
+      - name: Run x8 on chunk
         run: |
-          # Install Go
-          if ! command -v go &> /dev/null; then
-            echo "Installing Go..."
-            wget https://golang.org/dl/go1.20.2.linux-amd64.tar.gz
-            sudo tar -C /usr/local -xzf go1.20.2.linux-amd64.tar.gz
-            export PATH=$PATH:/usr/local/go/bin
-            export GOPATH=$HOME/go
-            export PATH=$PATH:$GOPATH/bin
-            echo "export PATH=$PATH:/usr/local/go/bin:$GOPATH/bin" >> $GITHUB_ENV
+          mkdir -p x8-results-${{ matrix.chunk }}
+          
+          if [ -f "consolidated-httpx-results/all-httpx.txt" ] && [ -s "consolidated-httpx-results/all-httpx.txt" ]; then
+            TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
+            LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
+            START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
+            END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
+            
+            sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
+            
+            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
+              echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < x8-chunk-${{ matrix.chunk }}.txt) URLs"
+              
+              if [[ -s "combined-results/unfurl-params.txt" ]]; then
+                if [[ -n "${{ inputs.headers }}" ]]; then
+                  cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
+                else
+                  cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
+                fi
+              else
+                echo "unfurl-params.txt not found or empty, creating empty output"
+                touch x8-results-${{ matrix.chunk }}/x8.txt
+              fi
+            else
+              echo "No URLs for this chunk, creating empty output"
+              touch x8-results-${{ matrix.chunk }}/x8.txt
+            fi
+          else
+            echo "No consolidated httpx results found, creating empty output"
+            touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
           
-          # Install httpx
-          echo "Installing httpx..."
-          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-          
-          # Install kxss - with retry and proper path export
-          echo "Installing kxss..."
-          export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
+          echo "x8 results count: $(wc -l < x8-results-${{ matrix.chunk }}/x8.txt)"
+
+      - name: Debug x8 output
+        run: |
+          echo "x8-results-${{ matrix.chunk }}/ content:"
+          ls -la x8-results-${{ matrix.chunk }}/ || true
+          head -10 x8-results-${{ matrix.chunk }}/x8.txt || true
+
+      - name: Upload x8 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: x8-results-${{ matrix.chunk }}
+          path: x8-results-${{ matrix.chunk }}/
+          retention-days: 1
+          if-no-files-found: warn
+
+  kxss-scan:
+    needs: consolidate-httpx
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Download consolidated httpx results
+        uses: actions/download-artifact@v4
+        with:
+          name: consolidated-httpx-results
+          path: consolidated-httpx-results/
+
+      - name: Download combined results
+        uses: actions/download-artifact@v4
+        with:
+          name: combined-results
+          path: combined-results/
+        continue-on-error: true
+
+      - name: Debug downloaded artifacts
+        run: |
+          echo "==== consolidated-httpx-results content ===="
+          find consolidated-httpx-results -type f -exec ls -l {} \;
+          if [ -f "consolidated-httpx-results/all-httpx.txt" ]; then
+            echo "File exists with $(wc -l < consolidated-httpx-results/all-httpx.txt) lines"
+            head -5 consolidated-httpx-results/all-httpx.txt
+          else
+            echo "all-httpx.txt file not found"
+          fi
+
+      - name: Install kxss
+        run: |
           go install github.com/Emoe/kxss@latest
-          
-          # Check if kxss is installed, if not create a fallback script
-          if ! command -v kxss &> /dev/null; then
-            echo "kxss installation failed, creating fallback script"
-            cat << 'EOF' > /tmp/kxss
-#!/bin/bash
-# This is a fallback script when kxss fails to install
-echo "Fallback kxss script running"
-while read url; do
-  echo "$url - [FALLBACK SCRIPT] Unable to test properly"
-done
-EOF
-            chmod +x /tmp/kxss
-            sudo mv /tmp/kxss /usr/local/bin/kxss
-          fi
-          
-          # Verify installations
-          echo "Verifying tools..."
-          which httpx || echo "httpx not installed"
-          which kxss || echo "kxss not installed, using fallback"
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Run kxss on chunk
         run: |
-          # Make sure to export PATH in this step too
-          export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
-          
           mkdir -p kxss-results-${{ matrix.chunk }}
           
           if [ -f "consolidated-httpx-results/all-httpx.txt" ] && [ -s "consolidated-httpx-results/all-httpx.txt" ]; then
-            echo "Using consolidated httpx results"
             TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 6 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
@@ -114,59 +300,26 @@ EOF
             
             if [[ -s "kxss-urls-${{ matrix.chunk }}.txt" ]]; then
               echo "Running kxss for chunk ${{ matrix.chunk }} with $(wc -l < kxss-urls-${{ matrix.chunk }}.txt) URLs"
-              echo "First 5 URLs:"
-              head -5 kxss-urls-${{ matrix.chunk }}.txt
               
-              # Check for unfurl-params.txt in multiple locations
-              PARAMS_FILE=""
-              if [[ -s "consolidated-httpx-results/unfurl-params.txt" ]]; then
-                PARAMS_FILE="consolidated-httpx-results/unfurl-params.txt"
-                echo "Using unfurl-params.txt from consolidated-httpx-results"
-              elif [[ -s "combined-results/unfurl-params.txt" ]]; then
-                PARAMS_FILE="combined-results/unfurl-params.txt"
-                echo "Using unfurl-params.txt from combined-results"
-              else
-                echo "No unfurl-params.txt found, creating minimal version"
-                echo "q" > temp-params.txt
-                echo "s" >> temp-params.txt
-                echo "search" >> temp-params.txt
-                PARAMS_FILE="temp-params.txt"
-              fi
-              
-              echo "Parameters file contains $(wc -l < $PARAMS_FILE) entries"
-              
-              # Generate URLs with parameters for kxss
-              cat kxss-urls-${{ matrix.chunk }}.txt | while IFS= read -r url; do
-                # Extract base URL without existing parameters
-                BASE_URL=$(echo "$url" | cut -d'?' -f1)
-                echo "Processing base URL: $BASE_URL"
+              if [[ -f "combined-results/unfurl-params.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+                cat kxss-urls-${{ matrix.chunk }}.txt | while IFS= read -r url; do
+                  while IFS= read -r param; do
+                    echo "$url?${param}=KXSS"
+                  done < combined-results/unfurl-params.txt
+                done | sort -u > kxss-urls-final-${{ matrix.chunk }}.txt
                 
-                while IFS= read -r param; do
-                  echo "$BASE_URL?${param}=KXSS"
-                done < $PARAMS_FILE
-              done | sort -u > kxss-urls-final-${{ matrix.chunk }}.txt
-              
-              if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
-                echo "Processing $(wc -l < kxss-urls-final-${{ matrix.chunk }}.txt) final URLs with kxss"
-                echo "Sample URLs for kxss:"
-                head -5 kxss-urls-final-${{ matrix.chunk }}.txt
-                
-                # Verify kxss is available
-                if command -v kxss &> /dev/null; then
+                if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
+                  echo "Processing $(wc -l < kxss-urls-final-${{ matrix.chunk }}.txt) final URLs with kxss"
                   cat kxss-urls-final-${{ matrix.chunk }}.txt | kxss -timeout 300 -threads 50 > kxss-results-${{ matrix.chunk }}/kxss-output.txt || {
                     echo "kxss scan failed for chunk ${{ matrix.chunk }}"
                     touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
                   }
                 else
-                  echo "kxss command not available, using curl fallback"
-                  # Simple fallback using curl
-                  while IFS= read -r url; do
-                    echo "Testing: $url"
-                    echo "$url - [FALLBACK] Unable to test properly" >> kxss-results-${{ matrix.chunk }}/kxss-output.txt
-                  done < kxss-urls-final-${{ matrix.chunk }}.txt
+                  echo "No final URLs generated, creating empty output"
+                  touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
                 fi
               else
-                echo "No final URLs generated, creating empty output"
+                echo "unfurl-params.txt not found or empty, skipping parameter generation"
                 touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
               fi
             else
@@ -194,7 +347,7 @@ EOF
           retention-days: 1
           if-no-files-found: warn
 
-  # This job consolidates all results into a single artifact
+  # This job consolidates all results into a single artifact (optional)
   collect-results:
     needs: [x8-scan, kxss-scan]
     runs-on: ubuntu-latest
@@ -222,36 +375,19 @@ EOF
 
       - name: Combine all results
         run: |
-          # Debug output to see the actual structure
-          echo "==== X8 downloaded structure ===="
-          find downloaded-x8-results -type f | sort
-          
-          echo "==== KXSS downloaded structure ===="
-          find downloaded-kxss-results -type f | sort
-          
-          # Combine x8 results with better error handling
-          echo "Combining x8 results..."
+          # Combine x8 results
           if find downloaded-x8-results -name "x8.txt" -type f 2>/dev/null | grep -q .; then
-            find downloaded-x8-results -name "x8.txt" -type f -exec cat {} \; > all-results/x8/combined-x8-results.txt
+            cat downloaded-x8-results/*/x8.txt > all-results/x8/combined-x8-results.txt
             echo "Combined $(wc -l < all-results/x8/combined-x8-results.txt) x8 results"
-          elif [ -f "downloaded-x8-results/x8.txt" ]; then
-            # Handle merged artifacts case
-            cat downloaded-x8-results/x8.txt > all-results/x8/combined-x8-results.txt
-            echo "Combined $(wc -l < all-results/x8/combined-x8-results.txt) x8 results (from merged artifacts)"
           else
             echo "No x8 results found"
             touch all-results/x8/combined-x8-results.txt
           fi
           
-          # Combine kxss results with better error handling
-          echo "Combining kxss results..."
+          # Combine kxss results
           if find downloaded-kxss-results -name "kxss-output.txt" -type f 2>/dev/null | grep -q .; then
-            find downloaded-kxss-results -name "kxss-output.txt" -type f -exec cat {} \; > all-results/kxss/combined-kxss-results.txt
+            cat downloaded-kxss-results/*/kxss-output.txt > all-results/kxss/combined-kxss-results.txt
             echo "Combined $(wc -l < all-results/kxss/combined-kxss-results.txt) kxss results"
-          elif [ -f "downloaded-kxss-results/kxss-output.txt" ]; then
-            # Handle merged artifacts case
-            cat downloaded-kxss-results/kxss-output.txt > all-results/kxss/combined-kxss-results.txt
-            echo "Combined $(wc -l < all-results/kxss/combined-kxss-results.txt) kxss results (from merged artifacts)"
           else
             echo "No kxss results found"
             touch all-results/kxss/combined-kxss-results.txt
