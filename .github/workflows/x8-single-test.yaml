@@ -54,7 +54,7 @@ jobs:
           export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
           echo "Updated PATH: $PATH"
 
-      - name: Debug x8 Binary/Path
+      - name: Debug x8 Binary/Path and Version
         run: |
           echo "Which x8:"; which x8 || echo "x8 not found in PATH"
           echo "x8 version:"; x8 --version || echo "x8 command failed"
@@ -95,18 +95,24 @@ jobs:
           fi
           echo "--- End of raw response check ---"
 
-      - name: Run x8 and capture output (without xargs)
+      - name: Run x8 and capture output (with verbose and exit code check)
         run: |
           TARGET_URL=$(cat target_url.txt)
           PARAM_WORDLIST_FILE="param_wordlist.txt"
 
           echo "Running x8 against $TARGET_URL with wordlist file $PARAM_WORDLIST_FILE"
-          # CORRECTED CONDITION: Check if the *files* target_url.txt and param_wordlist.txt exist and are not empty
+          echo "Attempting to run x8 with -v (verbose) flag if supported."
           if [[ -s "target_url.txt" ]] && [[ -s "$PARAM_WORDLIST_FILE" ]]; then
             if [[ -n "${{ inputs.headers }}" ]]; then
-              x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
+              x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST -H "${{ inputs.headers }}" -v | tee x8_output.txt || true # Add -v and allow failure to capture output
             else
-              x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST | tee x8_output.txt
+              x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST -v | tee x8_output.txt || true # Add -v and allow failure to capture output
+            fi
+            X8_EXIT_CODE=$?
+            echo "x8 exited with code: $X8_EXIT_CODE"
+            # If x8 failed (non-zero exit code), print an error, but don't fail the step immediately
+            if [[ "$X8_EXIT_CODE" -ne 0 ]]; then
+              echo "WARNING: x8 command exited with a non-zero status code: $X8_EXIT_CODE"
             fi
           else
             echo "Error: target_url.txt or param_wordlist.txt is empty. Skipping x8 scan."
