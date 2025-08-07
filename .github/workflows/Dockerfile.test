@@ -2,27 +2,25 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install core dependencies
 RUN apt-get update && \
     apt-get install -y wget curl ca-certificates unzip git bash golang-go && \
     rm -rf /var/lib/apt/lists/*
 
-# Install httpx as binary
+# httpx
 RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip \
   && unzip httpx_1.6.2_linux_amd64.zip \
   && mv httpx /usr/local/bin/httpx \
   && chmod +x /usr/local/bin/httpx \
   && rm -f httpx_1.6.2_linux_amd64.zip*
 
-# Install latest x8 as binary
-RUN wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O /usr/local/bin/x8 \
+# x8 (ثابت روی v0.9.7, اگر نسخه جدید اومد فقط خط زیر رو عوض کن)
+RUN wget -q https://github.com/Sh1Yo/x8/releases/download/v0.9.7/x8-linux-x86_64 -O /usr/local/bin/x8 \
   && chmod +x /usr/local/bin/x8
 
-# Install kxss via Go and move to /usr/local/bin
+# kxss
 RUN go install github.com/Emoe/kxss@latest \
     && cp /root/go/bin/kxss /usr/local/bin/kxss \
     && chmod +x /usr/local/bin/kxss
 
 WORKDIR /workspace
-
 ENTRYPOINT ["/bin/bash"]
