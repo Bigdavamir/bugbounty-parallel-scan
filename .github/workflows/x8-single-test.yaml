@@ -108,9 +108,9 @@ jobs:
             touch "${DEBUG_OUTPUT_DIR}/x8-verbose.log"
           fi
 
-      - name: Start tmate session for live debugging (Optional)
-        # Uncomment this step if you want to connect via SSH to the runner for live debugging
-        # You will see an SSH command in the logs if this step runs successfully
-        # uses: mxschmitt/action-tmate@v3
-        # with:
-        #   ssh: true
+      # - name: Start tmate session for live debugging (Optional)
+      #   # Uncomment this step if you want to connect via SSH to the runner for live debugging
+      #   # You will see an SSH command in the logs if this step runs successfully
+      #   uses: mxschmitt/action-tmate@v3
+      #   with:
+      #     ssh: true
