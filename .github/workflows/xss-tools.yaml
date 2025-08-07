@@ -143,12 +143,20 @@ jobs:
             wc -l "$f" || echo "-"
           done
 
-      - name: Consolidate all httpx results (strip codes and colors)
+      # --- FIXED & SAFE CONSOLIDATION ---
+      - name: Consolidate all httpx results (strip codes and colors, safe)
         run: |
-          cat httpx-results-*/httpx.txt 2>/dev/null | \
-            sed -E 's/\x1b\[[0-9;]*m//g' | \             sed -E 's/ *\[[0-9]{3}\]$//' | \
-            sed 's/ *$//' | \
-            sort -u > consolidated-httpx-results/all-httpx.txt
+          COUNT=$(find . -type f -path './httpx-results-*/httpx.txt' | wc -l)
+          echo "Discovered chunk file count: $COUNT"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "NO chunk files to consolidate"
+            touch consolidated-httpx-results/all-httpx.txt
+          else
+            find . -type f -path './httpx-results-*/httpx.txt' -exec cat {} + | \
+              sed -E 's/\x1b\[[0-9;]*m//g' | \               sed -E 's/ *\[[0-9]{3}\]$//' | \
+              sed 's/ *$//' | \
+              sort -u > consolidated-httpx-results/all-httpx.txt
+          fi
           echo "Preview of consolidated-httpx-results/all-httpx.txt"
           head -20 consolidated-httpx-results/all-httpx.txt || echo "No results"
           echo "Total cleaned URLs: $(wc -l < consolidated-httpx-results/all-httpx.txt)"
@@ -303,4 +311,3 @@ jobs:
         with:
           path: kxss-results-${{ matrix.chunk }}/
           key: kxss-results-${{ matrix.chunk }}-${{ inputs.run_id }}
-
