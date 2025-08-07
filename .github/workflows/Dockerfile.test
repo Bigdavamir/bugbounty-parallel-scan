@@ -1,29 +1,44 @@
+# --------------------------
+# Dockerfile.xss-tools (for Ubuntu 22.04, fully stable)
+# --------------------------
+
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# نصب ابزارها
+# پتچ dependencies برای Rust و شبکه
 RUN apt-get update && \
-    apt-get install -y wget curl ca-certificates unzip git bash golang-go cargo && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y \
+        wget curl ca-certificates unzip git bash golang-go cargo \
+        pkg-config libssl-dev build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# بیلد x8 از سورس، با کامپایل مستقیم
+# ---------
+# 1. httpx - official binary (much faster & smaller)
+# ---------
+RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip && \
+    unzip httpx_1.6.2_linux_amd64.zip && \
+    mv httpx /usr/local/bin/httpx && \
+    chmod +x /usr/local/bin/httpx && \
+    rm -f httpx_1.6.2_linux_amd64.zip*
+
+# ---------
+# 2. x8 - must build from source (releases have no linux binary!)
+# ---------
 RUN git clone --depth=1 https://github.com/Sh1Yo/x8.git /tmp/x8 && \
     cd /tmp/x8 && \
     cargo build --release && \
     cp target/release/x8 /usr/local/bin/x8 && \
     chmod +x /usr/local/bin/x8 && \
-    rm -rf /tmp/x8
+    cd / && rm -rf /tmp/x8
 
-# httpx باینری
-RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip \
-  && unzip httpx_1.6.2_linux_amd64.zip \
-  && mv httpx /usr/local/bin/httpx \
-  && chmod +x /usr/local/bin/httpx \
-  && rm -f httpx_1.6.2_linux_amd64.zip*
+# ---------
+# 3. kxss - official way via Go
+# ---------
+RUN go install github.com/Emoe/kxss@latest && \
+    cp /root/go/bin/kxss /usr/local/bin/kxss && \
+    chmod +x /usr/local/bin/kxss
 
-# kxss (go install)
-RUN go install github.com/Emoe/kxss@latest && cp /root/go/bin/kxss /usr/local/bin/kxss && chmod +x /usr/local/bin/kxss
-
+# Sets
 WORKDIR /workspace
 ENTRYPOINT ["/bin/bash"]
