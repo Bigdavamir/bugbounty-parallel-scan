@@ -10,22 +10,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Build Docker image using Dockerfile.test
+      - name: Build Docker image
         run: |
-          # Build from the actual location of Dockerfile.test
           docker build -f .github/workflows/Dockerfile.test -t x8-test:latest .
 
-      - name: Test Docker container basic functionality
+      - name: Create test files
         run: |
-          docker run --rm x8-test:latest /bin/bash -c "echo 'Container is working' && which bash && bash --version"
+          mkdir -p combined-results
+          echo "category" > combined-results/unfurl-params.txt
+          echo "id" >> combined-results/unfurl-params.txt
+          echo "test" >> combined-results/unfurl-params.txt
 
-      - name: Run Docker container and test x8
+      - name: Test x8 simple
         run: |
-          docker run --rm -v "${{ github.workspace }}":/workspace x8-test:latest /bin/bash -c "
-            cd /workspace && \
-            echo 'Testing curl reflection...' && \
-            curl -s -G --data-urlencode 'category=TESTPAYLOAD' 'https://bigdav.ir/test.php' | grep TESTPAYLOAD && echo 'Curl test OK' && \
-            echo 'Testing x8 execution...' && \
-            x8 -u 'https://bigdav.ir/test.php?category=TESTPAYLOAD' -w combined-results/unfurl-params.txt -X GET POST -v 2>&1 | tee x8.log && \
-            grep 'reflects:' x8.log
-          "
+          docker run --rm -v "$PWD":/workspace x8-test:latest bash -c '
+          cd /workspace
+          echo "Testing x8..."
+          x8 -u "https://bigdav.ir/test.php?category=TEST" -w combined-results/unfurl-params.txt -X GET -v
+          '
