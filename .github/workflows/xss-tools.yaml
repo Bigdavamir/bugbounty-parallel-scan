@@ -142,10 +142,8 @@ jobs:
           else
             find . -type f -path './httpx-results-*/httpx.txt' -exec cat {} + | awk '{print $1}' | grep -E '^https?://' | sort -u > consolidated-httpx-results/all-httpx.txt
           fi
-
           echo 'https://1.bigdav.ir/test.php' >> consolidated-httpx-results/all-httpx.txt
           sort -u consolidated-httpx-results/all-httpx.txt -o consolidated-httpx-results/all-httpx.txt
-
           head -20 consolidated-httpx-results/all-httpx.txt || echo "No results"
           echo "Total URLs: $(wc -l < consolidated-httpx-results/all-httpx.txt)"
 
@@ -184,13 +182,12 @@ jobs:
           path: consolidated-httpx-results/
           key: consolidated-httpx-results-${{ inputs.run_id }}-v1fix
 
-      # === FULL DEBUG STEPS BEGIN ===
-      - name: [DEBUG] Show params wordlist
+      - name: "[DEBUG] Show params wordlist"
         run: |
           echo "====== combined-results/unfurl-params.txt ======"
           cat combined-results/unfurl-params.txt || echo "File not found!"
 
-      - name: [DEBUG] Show consolidated URL list before slicing
+      - name: "[DEBUG] Show consolidated URL list before slicing"
         run: |
           echo "====== consolidated-httpx-results/all-httpx.txt ======"
           head -20 consolidated-httpx-results/all-httpx.txt || echo "No consolidated file"
@@ -234,7 +231,7 @@ jobs:
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
 
-      - name: [DEBUG] Show raw x8 scan output
+      - name: "[DEBUG] Show raw x8 scan output"
         run: |
           echo "====== x8-results-${{ matrix.chunk }}/x8.txt ======"
           wc -l x8-results-${{ matrix.chunk }}/x8.txt || echo "-"
@@ -328,3 +325,4 @@ jobs:
         with:
           path: kxss-results-${{ matrix.chunk }}/
           key: kxss-results-${{ matrix.chunk }}-${{ inputs.run_id }}-v1fix
+
