@@ -76,17 +76,15 @@ jobs:
           FULL_URL="${TARGET_URL}?${TEST_PARAM}=${TEST_PAYLOAD}"
           
           echo "Attempting to fetch raw response for: $FULL_URL"
-          echo "Using headers: ${{ inputs.headers }}" # Debugging headers input
+          echo "Using raw headers input: '${{ inputs.headers }}'" # Debugging headers input
           
+          # Use direct curl execution instead of eval for safety
           if [[ -n "${{ inputs.headers }}" ]]; then
-            # Using single quotes for the headers value to correctly pass it to curl -H
-            curl_cmd="curl -k -s -L -D /dev/stderr -H '${{ inputs.headers }}' \"${FULL_URL}""
-            echo "Executing curl command: $curl_cmd"
-            eval "$curl_cmd" > curl_raw_output.txt || true
+            # Using double quotes for the headers value, so it's passed as a single argument.
+            # If the header value itself contains double quotes, they would need escaping in the YAML input.
+            curl -k -s -L -D /dev/stderr -H "${{ inputs.headers }}" "${FULL_URL}" > curl_raw_output.txt || true
           else
-            curl_cmd="curl -k -s -L -D /dev/stderr "${FULL_URL}""
-            echo "Executing curl command: $curl_cmd"
-            eval "$curl_cmd" > curl_raw_output.txt || true
+            curl -k -s -L -D /dev/stderr "${FULL_URL}" > curl_raw_output.txt || true
           fi
           
           echo "--- Raw response body (first 1000 chars) from curl: ---"
@@ -100,14 +98,18 @@ jobs:
           fi
           echo "--- End of raw response check ---"
 
-
       - name: Run x8 and capture output
         run: |
           echo "Running x8 against ${{ inputs.target_url }} with parameter ${{ inputs.test_param }}"
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
+          if [[ -s "target_url.txt" ]] && [[ -s "param_wordlist.txt" ]]; then
+            if [[ -n "${{ inputs.headers }}" ]]; then
+              cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
+            else
+              cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST | tee x8_output.txt
+            fi
           else
-            cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST | tee x8_output.txt
+            echo "Error: target_url.txt or param_wordlist.txt is empty. Skipping x8 scan."
+            touch x8_output.txt # Create an empty file to prevent subsequent step errors
           fi
           echo "x8 scan completed."
 
