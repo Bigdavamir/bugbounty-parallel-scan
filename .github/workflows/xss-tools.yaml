@@ -142,11 +142,10 @@ jobs:
           else
             find . -type f -path './httpx-results-*/httpx.txt' -exec cat {} + | awk '{print $1}' | grep -E '^https?://' | sort -u > consolidated-httpx-results/all-httpx.txt
           fi
-          
-          # اضافه کردن URL تستی مخصوص
+
           echo 'https://1.bigdav.ir/test.php' >> consolidated-httpx-results/all-httpx.txt
           sort -u consolidated-httpx-results/all-httpx.txt -o consolidated-httpx-results/all-httpx.txt
-          
+
           head -20 consolidated-httpx-results/all-httpx.txt || echo "No results"
           echo "Total URLs: $(wc -l < consolidated-httpx-results/all-httpx.txt)"
 
@@ -164,8 +163,6 @@ jobs:
           sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
           echo '==== DEBUG: CURRENT unfurl-params.txt ===='
           cat combined-results/unfurl-params.txt
-
-
 
   x8-scan:
     needs: consolidate-httpx
@@ -187,50 +184,67 @@ jobs:
           path: consolidated-httpx-results/
           key: consolidated-httpx-results-${{ inputs.run_id }}-v1fix
 
-      - name: Debug consolidated input for chunk
+      # === FULL DEBUG STEPS BEGIN ===
+      - name: [DEBUG] Show params wordlist
         run: |
-          head -10 consolidated-httpx-results/all-httpx.txt || echo "No consolidated file"
+          echo "====== combined-results/unfurl-params.txt ======"
+          cat combined-results/unfurl-params.txt || echo "File not found!"
+
+      - name: [DEBUG] Show consolidated URL list before slicing
+        run: |
+          echo "====== consolidated-httpx-results/all-httpx.txt ======"
+          head -20 consolidated-httpx-results/all-httpx.txt || echo "No consolidated file"
+          echo "URL count:"
           wc -l consolidated-httpx-results/all-httpx.txt || echo "-"
 
       - name: Install x8
         run: |
-          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && command -v x8 && exit 0 || echo "Direct download failed, trying cargo..."
+          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && command -v x8 && echo "x8 installed via direct download" && exit 0 || echo "Direct download failed, trying cargo..."
           curl https://sh.rustup.rs -sSf | sh -s -- -y
           source "$HOME/.cargo/env"
           cargo install x8 && echo "x8 installed via cargo" && exit 0
 
-      - name: Run x8 on ALL alive URLs
+      - name: Generate chunk and show for debug
         run: |
           mkdir -p x8-results-${{ matrix.chunk }}
-          if [ -s consolidated-httpx-results/all-httpx.txt ] && [ -s combined-results/unfurl-params.txt ]; then
+          if [ -s consolidated-httpx-results/all-httpx.txt ]; then
             TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
-            wc -l x8-chunk-${{ matrix.chunk }}.txt
-            head -10 x8-chunk-${{ matrix.chunk }}.txt
             awk '{print $1}' x8-chunk-${{ matrix.chunk }}.txt | grep -E '^https?://' > x8-chunk-${{ matrix.chunk }}.txt.cleaned && mv x8-chunk-${{ matrix.chunk }}.txt.cleaned x8-chunk-${{ matrix.chunk }}.txt
+          else
+            touch x8-chunk-${{ matrix.chunk }}.txt
+          fi
+          echo "====== x8-chunk-${{ matrix.chunk }}.txt ======"
+          wc -l x8-chunk-${{ matrix.chunk }}.txt || echo "-"
+          head -10 x8-chunk-${{ matrix.chunk }}.txt || echo "No chunk file created"
 
-            if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
-              if [[ -n "${{ inputs.headers }}" ]]; then
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
-              else
-                cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST > x8-results-${{ matrix.chunk }}/x8.txt || true
-              fi
+      - name: Run x8 and capture output (with debug)
+        run: |
+          if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
+            if [[ -n "${{ inputs.headers }}" ]]; then
+              cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" | tee x8-results-${{ matrix.chunk }}/x8.txt
             else
-              touch x8-results-${{ matrix.chunk }}/x8.txt
+              cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST | tee x8-results-${{ matrix.chunk }}/x8.txt
             fi
           else
+            echo "No valid input for x8"
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
+
+      - name: [DEBUG] Show raw x8 scan output
+        run: |
+          echo "====== x8-results-${{ matrix.chunk }}/x8.txt ======"
           wc -l x8-results-${{ matrix.chunk }}/x8.txt || echo "-"
-          head -10 x8-results-${{ matrix.chunk }}/x8.txt || echo "No output"
+          head -30 x8-results-${{ matrix.chunk }}/x8.txt || echo "No output"
 
       - name: Extract reflected/injectable params from x8
         run: |
           grep -Ei 'reflects|change reflect' x8-results-${{ matrix.chunk }}/x8.txt > x8-results-${{ matrix.chunk }}/x8-reflected.txt || true
           echo "Reflected candidates (count): $(wc -l < x8-results-${{ matrix.chunk }}/x8-reflected.txt)"
+          head -20 x8-results-${{ matrix.chunk }}/x8-reflected.txt || echo "No reflected param found"
 
       - name: Cache x8 results
         uses: actions/cache@v4
