@@ -1,0 +1,130 @@
+name: X8 Single URL Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'The single URL to test with x8'
+        required: true
+        default: 'https://bigdav.ir/test.php'
+        type: string
+      test_param:
+        description: 'The parameter name to test for reflection'
+        required: true
+        default: 'category'
+        type: string
+      test_payload:
+        description: 'The test payload to use for curl reflection check'
+        required: true
+        default: 'TESTPAYLOAD'
+        type: string
+      headers:
+        description: 'Optional custom headers (e.g., "Cookie: value; Authorization: Bearer token")'
+        required: false
+        type: string
+
+jobs:
+  run-x8-single-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install x8 (Hybrid, Fix PATH)
+        run: |
+          set -ex
+          echo "Attempting direct download of x8..."
+          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && \
+          chmod +x x8 && \
+          sudo mv x8 /usr/local/bin/ && \
+          command -v x8 && \
+          echo "x8 installed via direct download" && \
+          exit 0
+          
+          echo "Direct download failed, trying cargo..."
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          source "$HOME/.cargo/env"
+          cargo install x8 && \
+          echo "x8 installed via cargo"
+          
+          echo "Fixing PATH for x8..."
+          sudo cp "$HOME/.cargo/bin/x8" /usr/local/bin/x8 || true # Copy even if it fails, fallback is fine
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
+          echo "Updated PATH: $PATH"
+
+      - name: Debug x8 Binary/Path
+        run: |
+          echo "Which x8:"; which x8 || echo "x8 not found in PATH"
+          echo "x8 version:"; x8 --version || echo "x8 command failed"
+          ls -al /usr/local/bin/x8 $HOME/.cargo/bin/x8 || true
+          echo "Current PATH: $PATH"
+
+      - name: Prepare input files for x8
+        run: |
+          echo "${{ inputs.target_url }}" > target_url.txt
+          echo "${{ inputs.test_param }}" > param_wordlist.txt
+          echo "Target URL: $(cat target_url.txt)"
+          echo "Parameter Wordlist: $(cat param_wordlist.txt)"
+
+      - name: "[DEBUG] Check target URL's raw response in CI for reflection"
+        run: |
+          TARGET_URL="${{ inputs.target_url }}"
+          TEST_PARAM="${{ inputs.test_param }}"
+          TEST_PAYLOAD="${{ inputs.test_payload }}"
+          FULL_URL="${TARGET_URL}?${TEST_PARAM}=${TEST_PAYLOAD}"
+          
+          echo "Attempting to fetch raw response for: $FULL_URL"
+          echo "Using headers: ${{ inputs.headers }}" # Debugging headers input
+          
+          if [[ -n "${{ inputs.headers }}" ]]; then
+            # Using single quotes for the headers value to correctly pass it to curl -H
+            curl_cmd="curl -k -s -L -D /dev/stderr -H '${{ inputs.headers }}' \"${FULL_URL}""
+            echo "Executing curl command: $curl_cmd"
+            eval "$curl_cmd" > curl_raw_output.txt || true
+          else
+            curl_cmd="curl -k -s -L -D /dev/stderr "${FULL_URL}""
+            echo "Executing curl command: $curl_cmd"
+            eval "$curl_cmd" > curl_raw_output.txt || true
+          fi
+          
+          echo "--- Raw response body (first 1000 chars) from curl: ---"
+          head -c 1000 curl_raw_output.txt || echo "No response body or less than 1000 chars"
+          echo ""
+          echo "--- Checking for '${{ inputs.test_payload }}' reflection in curl output ---"
+          if grep -i "${{ inputs.test_payload }}" curl_raw_output.txt; then
+            echo "SUCCESS: '${{ inputs.test_payload }}' found in raw response."
+          else
+            echo "WARNING: '${{ inputs.test_payload }}' NOT found in raw response."
+          fi
+          echo "--- End of raw response check ---"
+
+
+      - name: Run x8 and capture output
+        run: |
+          echo "Running x8 against ${{ inputs.target_url }} with parameter ${{ inputs.test_param }}"
+          if [[ -n "${{ inputs.headers }}" ]]; then
+            cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
+          else
+            cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST | tee x8_output.txt
+          fi
+          echo "x8 scan completed."
+
+      - name: Display raw x8 output
+        run: |
+          echo "====== Raw x8 Scan Output ======"
+          cat x8_output.txt || echo "x8_output.txt not found or empty."
+          echo "================================"
+
+      - name: Extract reflected/injectable params from x8 output
+        run: |
+          echo "====== Filtered x8 Reflected/Injectable Parameters ======"
+          grep -Ei 'reflects|change reflect' x8_output.txt > x8_reflected_params.txt || true
+          if [[ -s "x8_reflected_params.txt" ]]; then
+            cat x8_reflected_params.txt
+            echo "Total reflected/injectable lines found: $(wc -l < x8_reflected_params.txt)"
+          else
+            echo "No reflected or injectable parameters found in x8 output."
+          fi
+          echo "========================================================"
