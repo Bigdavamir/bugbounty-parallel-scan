@@ -97,29 +97,24 @@ jobs:
 
       - name: Run x8 with verbose output and stderr capture
         run: |
-          mkdir -p x8-results-${{ matrix.chunk }} # اگر در تست ورکفلو ندارید، حذف کنید
-          # Set locale to ensure consistent environment
+          set -euxo pipefail # Add this line
+          mkdir -p x8-results-${{ matrix.chunk }}
           export LANG=en_US.UTF-8
           export LC_ALL=en_US.UTF-8
           
-          # Create input files (if not already done by previous steps)
           echo "https://bigdav.ir/test.php" > target_url.txt
           echo "category" > param_wordlist.txt
 
-          # Check if input files exist and are not empty before running x8
           if [[ -s "target_url.txt" ]] && [[ -s "param_wordlist.txt" ]]; then
             echo "Running x8 with verbose output..."
-            # Execute x8, redirecting both stdout and stderr to stdout, then tee to file and console
-            # The '|| true' is to prevent the step from failing if x8 exits with a non-zero code.
             x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v 2>&1 | tee x8-results-${{ matrix.chunk }}/x8-verbose.log || true
             
             X8_EXIT_CODE=$?
             echo "x8 exited with code: $X8_EXIT_CODE"
-
+            
             echo "Raw x8 Scan Output (from tee file):"
             cat x8-results-${{ matrix.chunk }}/x8-verbose.log || echo "x8-verbose.log not found or empty."
 
-            # Optional: Check if the desired string is in the log file
             if grep -q "reflections: category" x8-results-${{ matrix.chunk }}/x8-verbose.log; then
               echo "SUCCESS: 'reflections: category' found in x8 output."
             else
@@ -127,12 +122,12 @@ jobs:
             fi
           else
             echo "ERROR: Input files target_url.txt or param_wordlist.txt are empty or not found."
-            touch x8-results-${{ matrix.chunk }}/x8-verbose.log # Ensure file exists even if inputs are bad
+            touch x8-results-${{ matrix.chunk }}/x8-verbose.log
           fi
         env:
-          # Explicitly set locale variables for the step
           LANG: en_US.UTF-8
           LC_ALL: en_US.UTF-8
+
 
 
       - name: Display raw x8 output
