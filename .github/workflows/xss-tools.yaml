@@ -87,21 +87,18 @@ jobs:
           ls -l httpx-results-${{ matrix.chunk }}/ || true
           head -10 httpx-results-${{ matrix.chunk }}/httpx.txt || true
 
-      # Cache individual chunk results
       - name: Cache httpx results
         uses: actions/cache@v4
         with:
           path: httpx-results-${{ matrix.chunk }}/
           key: httpx-results-${{ matrix.chunk }}-${{ inputs.run_id }}
       
-      # Cache all results in a shared location too
       - name: Cache shared httpx results
         uses: actions/cache@v4
         with:
           path: shared-httpx-results/
           key: shared-httpx-results-${{ inputs.run_id }}-${{ matrix.chunk }}
 
-  # This job consolidates all httpx results into one place
   consolidate-httpx:
     needs: httpx-scan
     runs-on: ubuntu-latest
@@ -109,7 +106,6 @@ jobs:
       - name: Create output directory
         run: mkdir -p consolidated-httpx-results
       
-      # Try to restore from shared location first
       - name: Restore shared httpx results
         uses: actions/cache@v4
         with:
@@ -118,7 +114,6 @@ jobs:
           restore-keys: |
             shared-httpx-results-${{ inputs.run_id }}-
 
-      # Also try individual chunks as backup
       - name: Restore all httpx results (backup method)
         uses: actions/cache@v4
         with:
@@ -144,27 +139,20 @@ jobs:
 
       - name: Consolidate all httpx results
         run: |
-          # First try the shared location
           if find shared-httpx-results -name "*.txt" -type f 2>/dev/null | grep -q .; then
             echo "Using shared httpx results"
             cat shared-httpx-results/*.txt > consolidated-httpx-results/all-httpx.txt
-          # Then try individual chunks
           elif find httpx-results-* -name "httpx.txt" -type f 2>/dev/null | grep -q .; then
             echo "Using individual httpx results"
             find httpx-results-* -name "httpx.txt" -type f -exec cat {} \; > consolidated-httpx-results/all-httpx.txt
-          # Finally fallback to dynamic-urls.txt
           else
             echo "No httpx results found, attempting to restore combined results"
-            # Restore combined results as final fallback
             mkdir -p combined-results
             echo "Restoring combined results"
-            
-            # Try to restore combined results
             actions_cache_exists=false
             if curl -s -f "https://artifactcache.actions.githubusercontent.com/combined-results-${{ inputs.run_id }}" > /dev/null; then
               actions_cache_exists=true
             fi
-            
             if $actions_cache_exists; then
               echo "Cache exists, attempting to restore"
               mkdir -p combined-results-tmp
@@ -175,7 +163,6 @@ jobs:
               fi
               cd ..
             fi
-            
             if [ -f "combined-results/dynamic-urls.txt" ]; then
               echo "Using dynamic-urls.txt as fallback"
               grep '?' combined-results/dynamic-urls.txt > consolidated-httpx-results/all-httpx.txt || true
@@ -184,12 +171,10 @@ jobs:
               touch consolidated-httpx-results/all-httpx.txt
             fi
           fi
-          
           echo "Consolidated httpx results preview:"
           head -10 consolidated-httpx-results/all-httpx.txt || true
           echo "Total consolidated URLs: $(wc -l < consolidated-httpx-results/all-httpx.txt)"
       
-      # Cache the consolidated results
       - name: Cache consolidated httpx results
         uses: actions/cache@v4
         with:
@@ -255,19 +240,15 @@ jobs:
       - name: Run x8 on consolidated results
         run: |
           mkdir -p x8-results-${{ matrix.chunk }}
-          
           if [ -f "consolidated-httpx-results/all-httpx.txt" ] && [ -s "consolidated-httpx-results/all-httpx.txt" ]; then
             echo "Using consolidated httpx results"
             TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 4 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            
             sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
-            
             if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
               echo "Processing chunk ${{ matrix.chunk }} with $(wc -l < x8-chunk-${{ matrix.chunk }}.txt) URLs"
-              
               if [[ -s "combined-results/unfurl-params.txt" ]]; then
                 if [[ -n "${{ inputs.headers }}" ]]; then
                   cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
@@ -286,7 +267,6 @@ jobs:
             echo "No consolidated httpx results found, creating empty output"
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
-          
           echo "x8 results count: $(wc -l < x8-results-${{ matrix.chunk }}/x8.txt)"
 
       - name: Debug x8 output
@@ -334,6 +314,16 @@ jobs:
             echo "all-httpx.txt file not found"
           fi
 
+      - name: Install httpx with PATH fix
+        run: |
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
+          export PATH=$PATH:$(go env GOPATH)/bin
+          echo "Go PATH: $(go env GOPATH)"
+          echo "Current PATH: $PATH"
+          echo "httpx location: $(which httpx || echo 'not found in PATH')"
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
       - name: Install kxss
         run: |
           go install github.com/Emoe/kxss@latest
@@ -343,19 +333,15 @@ jobs:
         run: |
           mkdir -p kxss-results-${{ matrix.chunk }}
           export PATH=$PATH:$(go env GOPATH)/bin
-          
           if [ -f "consolidated-httpx-results/all-httpx.txt" ] && [ -s "consolidated-httpx-results/all-httpx.txt" ]; then
             echo "Using consolidated httpx results"
             TOTAL_LINES=$(wc -l < consolidated-httpx-results/all-httpx.txt)
             LINES_PER_CHUNK=$((TOTAL_LINES / 6 + 1))
             START_LINE=$((((${{ matrix.chunk }} - 1) * LINES_PER_CHUNK) + 1))
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
-            
             sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > kxss-urls-${{ matrix.chunk }}.txt
-            
             if [[ -s "kxss-urls-${{ matrix.chunk }}.txt" ]]; then
               echo "Running kxss for chunk ${{ matrix.chunk }} with $(wc -l < kxss-urls-${{ matrix.chunk }}.txt) URLs"
-              
               if [[ -f "combined-results/unfurl-params.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
                 cat kxss-urls-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 |
                 while IFS= read -r url; do
@@ -363,7 +349,6 @@ jobs:
                     echo "$url?${param}=KXSS"
                   done < combined-results/unfurl-params.txt
                 done | sort -u > kxss-urls-final-${{ matrix.chunk }}.txt
-                
                 if [[ -s "kxss-urls-final-${{ matrix.chunk }}.txt" ]]; then
                   echo "Processing $(wc -l < kxss-urls-final-${{ matrix.chunk }}.txt) final URLs with kxss"
                   cat kxss-urls-final-${{ matrix.chunk }}.txt | kxss -timeout 300 -threads 50 > kxss-results-${{ matrix.chunk }}/kxss-output.txt || {
@@ -386,7 +371,6 @@ jobs:
             echo "No consolidated httpx results found, creating empty output"
             touch kxss-results-${{ matrix.chunk }}/kxss-output.txt
           fi
-          
           echo "kxss found $(wc -l < kxss-results-${{ matrix.chunk }}/kxss-output.txt) results for chunk ${{ matrix.chunk }}"
 
       - name: Debug kxss output
