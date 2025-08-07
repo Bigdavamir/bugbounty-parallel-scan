@@ -98,10 +98,11 @@ jobs:
       - name: Run x8 and capture output (without xargs)
         run: |
           TARGET_URL=$(cat target_url.txt)
-          PARAM_WORDLIST_FILE="param_wordlist.txt" # This file contains "category"
+          PARAM_WORDLIST_FILE="param_wordlist.txt"
 
           echo "Running x8 against $TARGET_URL with wordlist file $PARAM_WORDLIST_FILE"
-          if [[ -s "$TARGET_URL" ]] && [[ -s "$PARAM_WORDLIST_FILE" ]]; then
+          # CORRECTED CONDITION: Check if the *files* target_url.txt and param_wordlist.txt exist and are not empty
+          if [[ -s "target_url.txt" ]] && [[ -s "$PARAM_WORDLIST_FILE" ]]; then
             if [[ -n "${{ inputs.headers }}" ]]; then
               x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
             else
