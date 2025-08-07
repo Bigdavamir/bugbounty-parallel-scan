@@ -29,33 +29,49 @@ jobs:
       - name: Install x8 (cargo build)
         run: |
           set -euxo pipefail
-          # Install Rust (if not already in environment)
+          echo "Checking for existing Rust installation..."
           if ! command -v cargo >/dev/null 2>&1; then
+            echo "Rust not found, installing Rust via rustup..."
             curl https://sh.rustup.rs -sSf | sh -s -- -y
+            echo "Sourcing cargo environment..."
             source "$HOME/.cargo/env"
+          else
+            echo "Rust already installed."
+            source "$HOME/.cargo/env" # Ensure cargo env is sourced for current shell
           fi
-          source "$HOME/.cargo/env"
-          # Install x8 globally, upgrades if already installed
+          
+          echo "Installing/Updating x8 via cargo..."
           cargo install --force x8
-          # Add cargo bin to PATH
+          
+          echo "Adding cargo bin to GITHUB_PATH..."
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          which x8 || echo "x8 not found in PATH!"
-          x8 --version || true
+          
+          echo "Verifying x8 installation..."
+          which x8 || { echo "Error: x8 command not found after installation!"; exit 1; }
+          x8 --version || { echo "Error: Failed to get x8 version!"; exit 1; }
+          echo "x8 installation complete."
 
-      - name: Debug Curl Raw Response
+      - name: Debug Curl Raw Response (Fixed)
         run: |
           set -euxo pipefail
           echo "Debugging raw curl response for input domain: ${{ github.event.inputs.domain }}"
           echo "Testing with payload: TESTPAYLOAD"
 
-          CURL_COMMAND="curl -k -s -X GET '${{ github.event.inputs.domain }}?${{ github.event.inputs.parameter }}=TESTPAYLOAD'"
+          TARGET_URL="${{ github.event.inputs.domain }}?${{ github.event.inputs.parameter }}=TESTPAYLOAD"
+          HEADERS="${{ github.event.inputs.headers }}"
 
-          if [ -n "${{ github.event.inputs.headers }}" ]; then
-            CURL_COMMAND="${CURL_COMMAND} -H \"${{ github.event.inputs.headers }}""
+          echo "Target URL: $TARGET_URL"
+          echo "Headers provided: '$HEADERS'"
+
+          RAW_RESPONSE=""
+          if [ -n "$HEADERS" ]; then
+            echo "Executing curl command with headers..."
+            RAW_RESPONSE=$(curl -k -s -X GET "$TARGET_URL" -H "$HEADERS")
+          else
+            echo "Executing curl command without headers..."
+            RAW_RESPONSE=$(curl -k -s -X GET "$TARGET_URL")
           fi
 
-          echo "Executing curl command: $CURL_COMMAND"
-          RAW_RESPONSE=$(eval "$CURL_COMMAND")
           echo "Raw Curl Response:"
           echo "$RAW_RESPONSE"
 
@@ -66,45 +82,15 @@ jobs:
           fi
           echo "----------------------------------------"
 
-      - name: Run x8 with verbose output and stderr capture
+      - name: Prepare input files for x8
         run: |
           set -euxo pipefail
-          export LANG=en_US.UTF-8
-          export LC_ALL=en_US.UTF-8
-
           echo "${{ github.event.inputs.domain }}" > target_url.txt
           echo "${{ github.event.inputs.parameter }}" > param_wordlist.txt
+          mkdir -p x8-debug-results
+          echo "Input files created: target_url.txt, param_wordlist.txt"
 
-          DEBUG_OUTPUT_DIR="x8-debug-results"
-          mkdir -p "$DEBUG_OUTPUT_DIR"
-
-          echo "Running x8 with verbose output on ${{ github.event.inputs.domain }}..."
-          echo "Parameter wordlist: ${{ github.event.inputs.parameter }}"
-
-          if [[ -s "target_url.txt" ]] && [[ -s "param_wordlist.txt" ]]; then
-            # Must use full path to x8 in case cargo bin isn't sourced in non-interactive shell
-            export PATH="$HOME/.cargo/bin:$PATH"
-            x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v 2>&1 | tee "${DEBUG_OUTPUT_DIR}/x8-verbose.log" || true
-
-            X8_EXIT_CODE=$?
-            echo "x8 exited with code: $X8_EXIT_CODE"
-
-            echo "--- Raw x8 Scan Output (from log file): ---"
-            cat "${DEBUG_OUTPUT_DIR}/x8-verbose.log" || echo "x8-verbose.log not found or empty."
-            echo "--------------------------------------------"
-
-            if grep -q "reflections: ${{ github.event.inputs.parameter }}" "${DEBUG_OUTPUT_DIR}/x8-verbose.log"; then
-              echo "SUCCESS: 'reflections: ${{ github.event.inputs.parameter }}' found in x8 output."
-            else
-              echo "WARNING: 'reflections: ${{ github.event.inputs.parameter }}' NOT found in x8 output."
-              echo "This indicates x8 is still not reporting the reflection in CI."
-            fi
-          else
-            echo "ERROR: Input files target_url.txt or param_wordlist.txt are empty or not found."
-            touch "${DEBUG_OUTPUT_DIR}/x8-verbose.log"
-          fi
-
-      # - name: Start tmate session for live debugging (Optional)
-      #   uses: mxschmitt/action-tmate@v3
-      #   with:
-      #     ssh: true
+      - name: Start tmate session for live debugging
+        uses: mxschmitt/action-tmate@v3
+        with:
+          ssh: true
