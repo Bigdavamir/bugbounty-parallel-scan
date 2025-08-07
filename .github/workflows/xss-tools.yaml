@@ -144,7 +144,7 @@ jobs:
           fi
           
           # اضافه کردن URL تستی مخصوص
-          echo 'https://your-vuln-site.com/test.php' >> consolidated-httpx-results/all-httpx.txt
+          echo 'https://bigdav.ir/test.php' >> consolidated-httpx-results/all-httpx.txt
           sort -u consolidated-httpx-results/all-httpx.txt -o consolidated-httpx-results/all-httpx.txt
           
           head -20 consolidated-httpx-results/all-httpx.txt || echo "No results"
