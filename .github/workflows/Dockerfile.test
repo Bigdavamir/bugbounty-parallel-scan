@@ -1,12 +1,3 @@
-# ==== Stage 1: Build x8 from cargo ====
-FROM rust:1.77 as build-x8
-RUN cargo install --root /root/.cargo x8
-
-# ==== Stage 2: Build kxss from go ====
-FROM golang:1.22 as build-kxss
-RUN go install github.com/Emoe/kxss@latest
-
-# ==== Stage 3: Final image ====
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -17,33 +8,31 @@ RUN apt-get update && \
       curl \
       ca-certificates \
       bash \
-      iputils-ping \
       git \
       unzip \
-      # Only needed for some tools:
+      # اینا فقط اگه خواستی ابزار دیگه ای هم نصب کنی می‌مونه:
       build-essential \
       libssl-dev \
       pkg-config \
       libcurl4-openssl-dev \
+      golang-go \
     && rm -rf /var/lib/apt/lists/*
 
-# httpx: Install official prebuilt binary (x86_64)
+# نصب httpx به صورت باینری
 RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip \
-    && unzip httpx_1.6.2_linux_amd64.zip \
-    && mv httpx /usr/local/bin/httpx \
-    && chmod +x /usr/local/bin/httpx \
-    && rm httpx_1.6.2_linux_amd64.zip LICENSE README.md
+  && unzip httpx_1.6.2_linux_amd64.zip \
+  && mv httpx /usr/local/bin/httpx \
+  && chmod +x /usr/local/bin/httpx \
+  && rm httpx_1.6.2_linux_amd64.zip LICENSE README.md
 
-# x8: Copy from builder
-COPY --from=build-x8 /root/.cargo/bin/x8 /usr/local/bin/x8
+# نصب x8 به صورت باینری از ریلیز رسمی (آخرین ورژن قابل اطمینان)
+RUN wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O /usr/local/bin/x8 \
+  && chmod +x /usr/local/bin/x8
 
-# kxss: Copy from builder
-COPY --from=build-kxss /go/bin/kxss /usr/local/bin/kxss
-
-RUN chmod +x /usr/local/bin/x8 /usr/local/bin/httpx /usr/local/bin/kxss
-
-# Show tools version as build check
-RUN x8 --help | head -n 5 && httpx -version && kxss -help | head -n 5
+# نصب kxss (تنها همینو باید با Go نصب کنی)
+RUN go install github.com/Emoe/kxss@latest \
+  && cp /root/go/bin/kxss /usr/local/bin/kxss \
+  && chmod +x /usr/local/bin/kxss
 
 WORKDIR /workspace
 
