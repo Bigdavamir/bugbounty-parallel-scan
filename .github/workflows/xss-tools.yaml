@@ -156,12 +156,15 @@ jobs:
           path: consolidated-httpx-results/
           key: consolidated-httpx-results-${{ inputs.run_id }}-v1fix
 
-      - name: Add test param to unfurl-params.txt
+      - name: Add test param to unfurl-params.txt and print for debug
         run: |
           mkdir -p combined-results
           touch combined-results/unfurl-params.txt
           echo 'test' >> combined-results/unfurl-params.txt
           sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
+          echo '==== DEBUG: CURRENT unfurl-params.txt ===='
+          cat combined-results/unfurl-params.txt
+
 
 
   x8-scan:
