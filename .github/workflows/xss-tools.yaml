@@ -133,10 +133,14 @@ jobs:
           echo "==== Listing downloaded httpx results ===="
           find downloaded-httpx-results -type f | sort
           
-          # Consolidate all httpx.txt files
-          if find downloaded-httpx-results -name "httpx.txt" -type f 2>/dev/null | grep -q .; then
-            echo "Consolidating httpx results from all chunks"
-            cat downloaded-httpx-results/*/httpx.txt > consolidated-httpx-results/all-httpx.txt
+          # بررسی وجود فایل‌ها در حالت‌های مختلف
+          if [[ -f "downloaded-httpx-results/httpx.txt" ]]; then
+            echo "Using httpx.txt from merged results"
+            cat downloaded-httpx-results/httpx.txt > consolidated-httpx-results/all-httpx.txt
+          # بررسی وجود فایل‌ها در زیرپوشه‌ها
+          elif find downloaded-httpx-results -path "*/httpx.txt" -type f 2>/dev/null | grep -q .; then
+            echo "Consolidating httpx results from subdirectories"
+            find downloaded-httpx-results -path "*/httpx.txt" -type f -exec cat {} \; > consolidated-httpx-results/all-httpx.txt
           else
             echo "No httpx results found, attempting to use dynamic-urls.txt as fallback"
             if [[ -f "combined-results/dynamic-urls.txt" ]]; then
