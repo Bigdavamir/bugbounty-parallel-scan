@@ -12,7 +12,9 @@ jobs:
 
       - name: Build Docker image using Dockerfile.test
         run: |
-          docker build -f Dockerfile.test -t x8-test:latest .
+          # Build from the actual location of Dockerfile.test
+          docker build -f .github/workflows/Dockerfile.test -t x8-test:latest .
+
 
       - name: Run Docker container and test x8
         run: |
