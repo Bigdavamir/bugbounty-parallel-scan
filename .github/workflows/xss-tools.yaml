@@ -230,6 +230,25 @@ jobs:
           wc -l x8-chunk-${{ matrix.chunk }}.txt || echo "-"
           head -10 x8-chunk-${{ matrix.chunk }}.txt || echo "No chunk file created"
 
+      - name: "[DEBUG] Check target URL's raw response in CI"
+        run: |
+          TARGET_URL=$(head -n 1 x8-chunk-${{ matrix.chunk }}.txt)
+          if [[ -n "$TARGET_URL" ]]; then
+            echo "Attempting to fetch raw response for: $TARGET_URL"
+            if [[ -n "${{ inputs.headers }}" ]]; then
+              # Using single quotes for the headers value to correctly pass it to curl -H
+              curl -k -s -L -D /dev/stderr -H '${{ inputs.headers }}' "${TARGET_URL}?category=TESTPAYLOAD" > curl_output.txt || true
+            else
+              curl -k -s -L -D /dev/stderr "${TARGET_URL}?category=TESTPAYLOAD" > curl_output.txt || true
+            fi
+            echo "--- Raw response body (first 500 chars) from curl: ---"
+            head -c 500 curl_output.txt || echo "No response body"
+            echo "--- Checking for 'TESTPAYLOAD' reflection in curl output ---"
+            grep -i 'TESTPAYLOAD' curl_output.txt || echo "TESTPAYLOAD not found in raw response"
+          else
+            echo "No target URL found in x8-chunk-${{ matrix.chunk }}.txt for raw response check."
+          fi
+
       - name: Run x8 and capture output (with debug)
         run: |
           if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
