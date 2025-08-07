@@ -2,25 +2,28 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# نصب ابزارها
 RUN apt-get update && \
-    apt-get install -y wget curl ca-certificates unzip git bash golang-go && \
+    apt-get install -y wget curl ca-certificates unzip git bash golang-go cargo && \
     rm -rf /var/lib/apt/lists/*
 
-# httpx
+# بیلد x8 از سورس، با کامپایل مستقیم
+RUN git clone --depth=1 https://github.com/Sh1Yo/x8.git /tmp/x8 && \
+    cd /tmp/x8 && \
+    cargo build --release && \
+    cp target/release/x8 /usr/local/bin/x8 && \
+    chmod +x /usr/local/bin/x8 && \
+    rm -rf /tmp/x8
+
+# httpx باینری
 RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip \
   && unzip httpx_1.6.2_linux_amd64.zip \
   && mv httpx /usr/local/bin/httpx \
   && chmod +x /usr/local/bin/httpx \
   && rm -f httpx_1.6.2_linux_amd64.zip*
 
-# x8 (ثابت روی v0.9.7, اگر نسخه جدید اومد فقط خط زیر رو عوض کن)
-RUN wget -q https://github.com/Sh1Yo/x8/releases/download/v0.9.7/x8-linux-x86_64 -O /usr/local/bin/x8 \
-  && chmod +x /usr/local/bin/x8
-
-# kxss
-RUN go install github.com/Emoe/kxss@latest \
-    && cp /root/go/bin/kxss /usr/local/bin/kxss \
-    && chmod +x /usr/local/bin/kxss
+# kxss (go install)
+RUN go install github.com/Emoe/kxss@latest && cp /root/go/bin/kxss /usr/local/bin/kxss && chmod +x /usr/local/bin/kxss
 
 WORKDIR /workspace
 ENTRYPOINT ["/bin/bash"]
