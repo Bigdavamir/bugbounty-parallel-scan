@@ -59,7 +59,8 @@ jobs:
             head -10 chunk-${{ matrix.chunk }}.txt || echo "-"
 
             if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
-              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -status-code -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
+              # ️❗️>> ONLY change: removed -status-code, so just clean URL output
+              cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || {
                 echo "httpx failed, fallback to plain chunk"
                 cp chunk-${{ matrix.chunk }}.txt httpx-results-${{ matrix.chunk }}/httpx.txt
               }
