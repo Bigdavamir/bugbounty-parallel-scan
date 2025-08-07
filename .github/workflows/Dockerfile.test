@@ -1,13 +1,10 @@
-# Dockerfile.test - Final & Fixed Version
+# Dockerfile.test - rocket stable
 
-# Use official Ubuntu 22.04 as a base image
 FROM ubuntu:22.04
 
-# Set environment variables to ensure noninteractive installs and UTF-8 locale
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-# Install base system dependencies including wget, unzip, and build tools
 RUN apt-get update && apt-get install -y \
     build-essential \
     ca-certificates \
@@ -18,33 +15,26 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     unzip \
     wget \
-  && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# Install Rust toolchain for x8
+# Rust Install for x8
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-# Add cargo to the PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install x8 using cargo
 RUN cargo install x8
 
-# --- FIX: Install httpx and kxss using reliable methods ---
-
-# 1. Install httpx from pre-compiled binary (most reliable)
+# Download and install httpx (prebuilt)
 RUN wget https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip && \
     unzip httpx_1.6.2_linux_amd64.zip && \
     mv httpx /usr/local/bin/httpx && \
-    rm httpx_1.6.2_linux_amd64.zip CHANGES.md LICENSE.md README.md
+    chmod +x /usr/local/bin/httpx && \
+    rm httpx_1.6.2_linux_amd64.zip LICENSE.md
 
-# 2. Install kxss using go install (as it has no pre-compiled releases)
+# Install kxss using Go (no prebuilt for this)
 RUN go install github.com/Emoe/kxss@latest && \
-    # Ensure the binary is in the main PATH
     cp /root/go/bin/kxss /usr/local/bin/kxss
 
-# --- End of Fix ---
-
-# Set the working directory inside the container
 WORKDIR /workspace
 
-# Use bash as the default entrypoint
 ENTRYPOINT ["/bin/bash"]
