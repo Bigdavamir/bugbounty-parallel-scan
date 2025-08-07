@@ -78,10 +78,7 @@ jobs:
           echo "Attempting to fetch raw response for: $FULL_URL"
           echo "Using raw headers input: '${{ inputs.headers }}'" # Debugging headers input
           
-          # Use direct curl execution instead of eval for safety
           if [[ -n "${{ inputs.headers }}" ]]; then
-            # Using double quotes for the headers value, so it's passed as a single argument.
-            # If the header value itself contains double quotes, they would need escaping in the YAML input.
             curl -k -s -L -D /dev/stderr -H "${{ inputs.headers }}" "${FULL_URL}" > curl_raw_output.txt || true
           else
             curl -k -s -L -D /dev/stderr "${FULL_URL}" > curl_raw_output.txt || true
@@ -98,14 +95,17 @@ jobs:
           fi
           echo "--- End of raw response check ---"
 
-      - name: Run x8 and capture output
+      - name: Run x8 and capture output (without xargs)
         run: |
-          echo "Running x8 against ${{ inputs.target_url }} with parameter ${{ inputs.test_param }}"
-          if [[ -s "target_url.txt" ]] && [[ -s "param_wordlist.txt" ]]; then
+          TARGET_URL=$(cat target_url.txt)
+          PARAM_WORDLIST_FILE="param_wordlist.txt" # This file contains "category"
+
+          echo "Running x8 against $TARGET_URL with wordlist file $PARAM_WORDLIST_FILE"
+          if [[ -s "$TARGET_URL" ]] && [[ -s "$PARAM_WORDLIST_FILE" ]]; then
             if [[ -n "${{ inputs.headers }}" ]]; then
-              cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
+              x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST -H "${{ inputs.headers }}" | tee x8_output.txt
             else
-              cat target_url.txt | xargs -P 1 -I{} x8 -u "{}" -w param_wordlist.txt -X GET POST | tee x8_output.txt
+              x8 -u "$TARGET_URL" -w "$PARAM_WORDLIST_FILE" -X GET POST | tee x8_output.txt
             fi
           else
             echo "Error: target_url.txt or param_wordlist.txt is empty. Skipping x8 scan."
