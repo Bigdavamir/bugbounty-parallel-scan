@@ -6,16 +6,16 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Update and install dependencies for Rust and networking
+# Update and install dependencies
 RUN apt-get update && \
     apt-get install -y \
         wget curl ca-certificates unzip git bash golang-go cargo \
-        pkg-config libssl-dev build-essential \
+        pkg-config libssl-dev build-essential timeout \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------
-# 1. httpx - official binary (much faster & smaller)
+# 1. httpx - official binary
 # ---------
 RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip && \
     unzip httpx_1.6.2_linux_amd64.zip && \
@@ -24,7 +24,7 @@ RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/h
     rm -f httpx_1.6.2_linux_amd64.zip*
 
 # ---------
-# 2. x8 - must build from source (releases have no linux binary!)
+# 2. x8 - build from source
 # ---------
 RUN git clone --depth=1 https://github.com/Sh1Yo/x8.git /tmp/x8 && \
     cd /tmp/x8 && \
@@ -34,18 +34,25 @@ RUN git clone --depth=1 https://github.com/Sh1Yo/x8.git /tmp/x8 && \
     cd / && rm -rf /tmp/x8 ~/.cargo
 
 # ---------
-# 3. kxss - official way via Go
+# 3. kxss - via Go
 # ---------
 RUN go install github.com/Emoe/kxss@latest && \
     cp /root/go/bin/kxss /usr/local/bin/kxss && \
     chmod +x /usr/local/bin/kxss && \
     rm -rf /root/go
 
-# Verify tools are working
-RUN httpx -version && x8 --help && kxss -h
+# Verify installations and create basic wordlist
+RUN httpx -version && \
+    x8 --help && \
+    kxss -h && \
+    mkdir -p /tmp/wordlists && \
+    echo -e "category
+id
+test
+q
+search
+query
+keyword" > /tmp/wordlists/basic-params.txt
 
-# Set working directory
 WORKDIR /workspace
-
-# Use CMD instead of ENTRYPOINT for better compatibility
 CMD ["/bin/bash"]
