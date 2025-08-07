@@ -52,7 +52,6 @@ jobs:
             END_LINE=$((${{ matrix.chunk }} * LINES_PER_CHUNK))
             sed -n "${START_LINE},${END_LINE}p" combined-results/dynamic-urls.txt > chunk-${{ matrix.chunk }}.txt
             if [[ -s "chunk-${{ matrix.chunk }}.txt" ]]; then
-              # CLEAN URLS ONLY: No -status-code
               cat chunk-${{ matrix.chunk }}.txt | httpx -silent -threads 30 -timeout 10 -retries 2 -follow-redirects -rate-limit 10 > httpx-results-${{ matrix.chunk }}/httpx.txt || cp chunk-${{ matrix.chunk }}.txt httpx-results-${{ matrix.chunk }}/httpx.txt
               cp httpx-results-${{ matrix.chunk }}/httpx.txt shared-httpx-results/httpx-${{ matrix.chunk }}.txt
             else
@@ -141,9 +140,13 @@ jobs:
             echo "NO chunk files to consolidate"
             touch consolidated-httpx-results/all-httpx.txt
           else
-            # CLEAN: Only keep the first space-separated field (the URL)
             find . -type f -path './httpx-results-*/httpx.txt' -exec cat {} + | awk '{print $1}' | grep -E '^https?://' | sort -u > consolidated-httpx-results/all-httpx.txt
           fi
+          
+          # اضافه کردن URL تستی مخصوص
+          echo 'https://your-vuln-site.com/test.php' >> consolidated-httpx-results/all-httpx.txt
+          sort -u consolidated-httpx-results/all-httpx.txt -o consolidated-httpx-results/all-httpx.txt
+          
           head -20 consolidated-httpx-results/all-httpx.txt || echo "No results"
           echo "Total URLs: $(wc -l < consolidated-httpx-results/all-httpx.txt)"
 
@@ -152,6 +155,12 @@ jobs:
         with:
           path: consolidated-httpx-results/
           key: consolidated-httpx-results-${{ inputs.run_id }}-v1fix
+
+      # اضافه کردن پارامتر تست قبل از اجرای x8 یا kxss در همه job ها مناسب است
+      - name: Add test param to unfurl-params.txt
+        run: |
+          echo 'test' >> combined-results/unfurl-params.txt
+          sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
 
   x8-scan:
     needs: consolidate-httpx
@@ -196,8 +205,8 @@ jobs:
             sed -n "${START_LINE},${END_LINE}p" consolidated-httpx-results/all-httpx.txt > x8-chunk-${{ matrix.chunk }}.txt
             wc -l x8-chunk-${{ matrix.chunk }}.txt
             head -10 x8-chunk-${{ matrix.chunk }}.txt
-            # SAFETY: always clean input (last defense)
             awk '{print $1}' x8-chunk-${{ matrix.chunk }}.txt | grep -E '^https?://' > x8-chunk-${{ matrix.chunk }}.txt.cleaned && mv x8-chunk-${{ matrix.chunk }}.txt.cleaned x8-chunk-${{ matrix.chunk }}.txt
+
             if [[ -s "x8-chunk-${{ matrix.chunk }}.txt" ]]; then
               if [[ -n "${{ inputs.headers }}" ]]; then
                 cat x8-chunk-${{ matrix.chunk }}.txt | xargs -P 4 -I{} x8 -u "{}" -w combined-results/unfurl-params.txt -X GET POST -H "${{ inputs.headers }}" > x8-results-${{ matrix.chunk }}/x8.txt || true
@@ -212,6 +221,11 @@ jobs:
           fi
           wc -l x8-results-${{ matrix.chunk }}/x8.txt || echo "-"
           head -10 x8-results-${{ matrix.chunk }}/x8.txt || echo "No output"
+
+      - name: Extract reflected/injectable params from x8
+        run: |
+          grep -Ei 'reflects|change reflect' x8-results-${{ matrix.chunk }}/x8.txt > x8-results-${{ matrix.chunk }}/x8-reflected.txt || true
+          echo "Reflected candidates (count): $(wc -l < x8-results-${{ matrix.chunk }}/x8-reflected.txt)"
 
       - name: Cache x8 results
         uses: actions/cache@v4
