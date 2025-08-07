@@ -2,37 +2,26 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install core dependencies
 RUN apt-get update && \
-    apt-get install -y \
-      wget \
-      curl \
-      ca-certificates \
-      bash \
-      git \
-      unzip \
-      # اینا فقط اگه خواستی ابزار دیگه ای هم نصب کنی می‌مونه:
-      build-essential \
-      libssl-dev \
-      pkg-config \
-      libcurl4-openssl-dev \
-      golang-go \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get install -y wget curl ca-certificates unzip git bash golang-go && \
+    rm -rf /var/lib/apt/lists/*
 
-# نصب httpx به صورت باینری
+# Install httpx as binary
 RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip \
   && unzip httpx_1.6.2_linux_amd64.zip \
   && mv httpx /usr/local/bin/httpx \
   && chmod +x /usr/local/bin/httpx \
-  && rm httpx_1.6.2_linux_amd64.zip LICENSE README.md
+  && rm -f httpx_1.6.2_linux_amd64.zip*
 
-# نصب x8 به صورت باینری از ریلیز رسمی (آخرین ورژن قابل اطمینان)
+# Install latest x8 as binary
 RUN wget -q https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O /usr/local/bin/x8 \
   && chmod +x /usr/local/bin/x8
 
-# نصب kxss (تنها همینو باید با Go نصب کنی)
+# Install kxss via Go and move to /usr/local/bin
 RUN go install github.com/Emoe/kxss@latest \
-  && cp /root/go/bin/kxss /usr/local/bin/kxss \
-  && chmod +x /usr/local/bin/kxss
+    && cp /root/go/bin/kxss /usr/local/bin/kxss \
+    && chmod +x /usr/local/bin/kxss
 
 WORKDIR /workspace
 
