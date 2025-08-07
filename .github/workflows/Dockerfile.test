@@ -1,39 +1,49 @@
-# Dockerfile.test - rocket stable
+# ==== Stage 1: Build x8 from cargo ====
+FROM rust:1.77 as build-x8
+RUN cargo install --root /root/.cargo x8
 
+# ==== Stage 2: Build kxss from go ====
+FROM golang:1.22 as build-kxss
+RUN go install github.com/Emoe/kxss@latest
+
+# ==== Stage 3: Final image ====
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    ca-certificates \
-    curl \
-    git \
-    golang-go \
-    libssl-dev \
-    pkg-config \
-    unzip \
-    wget \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y \
+      wget \
+      curl \
+      ca-certificates \
+      bash \
+      iputils-ping \
+      git \
+      unzip \
+      # Only needed for some tools:
+      build-essential \
+      libssl-dev \
+      pkg-config \
+      libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Rust Install for x8
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+# httpx: Install official prebuilt binary (x86_64)
+RUN wget -q https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip \
+    && unzip httpx_1.6.2_linux_amd64.zip \
+    && mv httpx /usr/local/bin/httpx \
+    && chmod +x /usr/local/bin/httpx \
+    && rm httpx_1.6.2_linux_amd64.zip LICENSE README.md
 
-# Install x8 using cargo
-RUN cargo install x8
+# x8: Copy from builder
+COPY --from=build-x8 /root/.cargo/bin/x8 /usr/local/bin/x8
 
-# Download and install httpx (prebuilt)
-RUN wget https://github.com/projectdiscovery/httpx/releases/download/v1.6.2/httpx_1.6.2_linux_amd64.zip && \
-    unzip httpx_1.6.2_linux_amd64.zip && \
-    mv httpx /usr/local/bin/httpx && \
-    chmod +x /usr/local/bin/httpx && \
-    rm httpx_1.6.2_linux_amd64.zip LICENSE.md
+# kxss: Copy from builder
+COPY --from=build-kxss /go/bin/kxss /usr/local/bin/kxss
 
-# Install kxss using Go (no prebuilt for this)
-RUN go install github.com/Emoe/kxss@latest && \
-    cp /root/go/bin/kxss /usr/local/bin/kxss
+RUN chmod +x /usr/local/bin/x8 /usr/local/bin/httpx /usr/local/bin/kxss
+
+# Show tools version as build check
+RUN x8 --help | head -n 5 && httpx -version && kxss -help | head -n 5
 
 WORKDIR /workspace
 
