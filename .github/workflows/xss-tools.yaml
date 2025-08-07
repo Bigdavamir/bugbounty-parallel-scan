@@ -194,12 +194,24 @@ jobs:
           echo "URL count:"
           wc -l consolidated-httpx-results/all-httpx.txt || echo "-"
 
-      - name: Install x8
+      - name: Install x8 (Hybrid, Fix PATH)
         run: |
+          set -ex
           wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && chmod +x x8 && sudo mv x8 /usr/local/bin/ && command -v x8 && echo "x8 installed via direct download" && exit 0 || echo "Direct download failed, trying cargo..."
           curl https://sh.rustup.rs -sSf | sh -s -- -y
           source "$HOME/.cargo/env"
-          cargo install x8 && echo "x8 installed via cargo" && exit 0
+          cargo install x8 && echo "x8 installed via cargo"
+          sudo cp $HOME/.cargo/bin/x8 /usr/local/bin/x8
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
+
+      - name: Debug x8 Binary/Path
+        run: |
+          echo "Which x8:"; which x8 || echo "not in PATH"
+          echo "x8 version:"; x8 --version || echo "not working"
+          ls -al /usr/local/bin/x8 $HOME/.cargo/bin/x8 || true
+          echo "PATH:"; echo $PATH
 
       - name: Generate chunk and show for debug
         run: |
@@ -325,4 +337,3 @@ jobs:
         with:
           path: kxss-results-${{ matrix.chunk }}/
           key: kxss-results-${{ matrix.chunk }}-${{ inputs.run_id }}-v1fix
-
