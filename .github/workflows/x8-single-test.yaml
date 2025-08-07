@@ -15,13 +15,17 @@ jobs:
           # Build from the actual location of Dockerfile.test
           docker build -f .github/workflows/Dockerfile.test -t x8-test:latest .
 
+      - name: Test Docker container basic functionality
+        run: |
+          docker run --rm x8-test:latest /bin/bash -c "echo 'Container is working' && which bash && bash --version"
 
       - name: Run Docker container and test x8
         run: |
-          docker run --rm -v "${{ github.workspace }}":/workspace x8-test:latest bash -c "\
+          docker run --rm -v "${{ github.workspace }}":/workspace x8-test:latest /bin/bash -c "
             cd /workspace && \
             echo 'Testing curl reflection...' && \
             curl -s -G --data-urlencode 'category=TESTPAYLOAD' 'https://bigdav.ir/test.php' | grep TESTPAYLOAD && echo 'Curl test OK' && \
             echo 'Testing x8 execution...' && \
             x8 -u 'https://bigdav.ir/test.php?category=TESTPAYLOAD' -w combined-results/unfurl-params.txt -X GET POST -v 2>&1 | tee x8.log && \
-            grep 'reflects:' x8.log"
+            grep 'reflects:' x8.log
+          "
