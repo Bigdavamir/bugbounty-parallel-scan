@@ -28,15 +28,18 @@ jobs:
           restore-keys: |
             combined-results-
 
-      - name: Debug combined-results/dynamic-urls.txt
+      - name: Debug dynamic-urls
         run: |
-          echo "=== combined-results/dynamic-urls.txt ==="
-          [ -f combined-results/dynamic-urls.txt ] && head -20 combined-results/dynamic-urls.txt || echo "File not found"
-          [ -f combined-results/dynamic-urls.txt ] && wc -l combined-results/dynamic-urls.txt || true
+          echo "==== combined-results/dynamic-urls.txt preview ===="
+          if [[ -f combined-results/dynamic-urls.txt ]]; then
+            head -10 combined-results/dynamic-urls.txt
+            wc -l combined-results/dynamic-urls.txt
+          else
+            echo "combined-results/dynamic-urls.txt not found!"
+          fi
 
       - name: Install httpx with PATH fix
         run: |
-          echo "Installing httpx..."
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           echo "export PATH=\$PATH:\$(go env GOPATH)/bin" >> $GITHUB_ENV
           export PATH=$PATH:$(go env GOPATH)/bin
@@ -73,9 +76,8 @@ jobs:
       - name: Debug httpx-results dir after scan
         run: |
           echo "httpx-results-${{ matrix.chunk }}/ content:"
-          ls -l httpx-results-${{ matrix.chunk }}/
-          echo "First lines of httpx.txt:"
-          head -20 httpx-results-${{ matrix.chunk }}/httpx.txt || true
+          ls -l httpx-results-${{ matrix.chunk }}/ || true
+          head -10 httpx-results-${{ matrix.chunk }}/httpx.txt || true
 
       - name: Cache httpx results
         uses: actions/cache@v4
@@ -121,18 +123,11 @@ jobs:
             httpx-results-7-${{ inputs.run_id }}
             httpx-results-8-${{ inputs.run_id }}
 
-      - name: Debug all httpx cache presence (x8-scan)
+      - name: Debug all httpx cache presence
         run: |
           echo "==== httpx-results-* directory list ===="
           ls -l httpx-results-*/ || true
           for d in httpx-results-*; do echo "$d:"; head -10 $d/*.txt || true; done
-
-      - name: Debug combined-results
-        run: |
-          echo "combined-results/dynamic-urls.txt:"
-          head -10 combined-results/dynamic-urls.txt || true
-          echo "combined-results/unfurl-params.txt:"
-          head -10 combined-results/unfurl-params.txt || true
 
       - name: Install x8
         run: |
@@ -161,7 +156,7 @@ jobs:
         run: |
           mkdir -p x8-results-${{ matrix.chunk }}
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
-          echo "=== preview dynamic-alive.txt ==="
+          echo "dynamic-alive.txt preview:"
           head -10 dynamic-alive.txt || true
           if [[ -s "dynamic-alive.txt" ]] && [[ -s "combined-results/unfurl-params.txt" ]]; then
             TOTAL_LINES=$(wc -l < dynamic-alive.txt)
@@ -182,7 +177,7 @@ jobs:
             touch x8-results-${{ matrix.chunk }}/x8.txt
           fi
 
-      - name: Debug x8-results output
+      - name: Debug x8 output
         run: |
           echo "x8-results-${{ matrix.chunk }}/ content:"
           ls -l x8-results-${{ matrix.chunk }}/ || true
@@ -232,18 +227,11 @@ jobs:
             httpx-results-7-${{ inputs.run_id }}
             httpx-results-8-${{ inputs.run_id }}
 
-      - name: Debug all httpx cache presence (kxss-scan)
+      - name: Debug all httpx cache presence
         run: |
           echo "==== httpx-results-* directory list ===="
           ls -l httpx-results-*/ || true
           for d in httpx-results-*; do echo "$d:"; head -10 $d/*.txt || true; done
-
-      - name: Debug input files
-        run: |
-          echo "combined-results/dynamic-urls.txt:"
-          head -10 combined-results/dynamic-urls.txt || true
-          echo "combined-results/unfurl-params.txt:"
-          head -10 combined-results/unfurl-params.txt || true
 
       - name: Install kxss
         run: |
@@ -255,7 +243,6 @@ jobs:
           mkdir -p kxss-results-${{ matrix.chunk }}
           export PATH=$PATH:$(go env GOPATH)/bin
           find . -name "httpx-results-*" -type d -exec cat {}/*.txt \; | grep '?' | sort -u > dynamic-alive.txt || true
-
           echo "dynamic-alive.txt preview:"
           head -10 dynamic-alive.txt || true
 
@@ -298,7 +285,7 @@ jobs:
           KXSS_COUNT=$(wc -l < kxss-results-${{ matrix.chunk }}/kxss-output.txt)
           echo "kxss found $KXSS_COUNT results for chunk ${{ matrix.chunk }}"
 
-      - name: Debug kxss-results output
+      - name: Debug kxss output
         run: |
           echo "kxss-results-${{ matrix.chunk }}/ content:"
           ls -l kxss-results-${{ matrix.chunk }}/ || true
@@ -309,3 +296,4 @@ jobs:
         with:
           path: kxss-results-${{ matrix.chunk }}/
           key: kxss-results-${{ matrix.chunk }}-${{ inputs.run_id }}
+
