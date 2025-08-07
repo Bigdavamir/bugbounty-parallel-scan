@@ -156,11 +156,13 @@ jobs:
           path: consolidated-httpx-results/
           key: consolidated-httpx-results-${{ inputs.run_id }}-v1fix
 
-      # اضافه کردن پارامتر تست قبل از اجرای x8 یا kxss در همه job ها مناسب است
       - name: Add test param to unfurl-params.txt
         run: |
+          mkdir -p combined-results
+          touch combined-results/unfurl-params.txt
           echo 'test' >> combined-results/unfurl-params.txt
           sort -u combined-results/unfurl-params.txt -o combined-results/unfurl-params.txt
+
 
   x8-scan:
     needs: consolidate-httpx
