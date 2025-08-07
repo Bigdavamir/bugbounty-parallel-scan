@@ -29,18 +29,17 @@ jobs:
       - name: Install x8 (cargo build)
         run: |
           set -euxo pipefail
-          echo "Checking for existing Rust installation..."
+          # Check and install Rust toolchain if missing
           if ! command -v cargo >/dev/null 2>&1; then
-            echo "Rust not found, installing Rust via rustup..."
             curl https://sh.rustup.rs -sSf | sh -s -- -y
             source "$HOME/.cargo/env"
           else
             source "$HOME/.cargo/env"
           fi
-          echo "Installing/Updating x8 via cargo..."
+          # Install or update x8
           cargo install --force x8
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          echo "Verifying x8 installation..."
+          # Verify installation
           which x8
           x8 --version
 
@@ -77,18 +76,22 @@ jobs:
         id: x8-scan
         run: |
           set -euxo pipefail
+          # Ensure x8 in PATH
           export PATH="$HOME/.cargo/bin:$PATH"
           export LANG=en_US.UTF-8
           export LC_ALL=en_US.UTF-8
 
           echo "--- x8 scan start ---"
-          X8_COMMAND="x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v"
+          # Build x8 command as an array to avoid eval and quoting issues
+          cmd=(x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v)
           if [ -n "${{ github.event.inputs.headers }}" ]; then
-            X8_COMMAND="$X8_COMMAND -H \"${{ github.event.inputs.headers }}""
+            cmd+=( -H "${{ github.event.inputs.headers }}" )
           fi
-          echo "Executing: $X8_COMMAND"
-          eval $X8_COMMAND 2>&1 | tee x8-debug-results/x8.log
-          echo "--- x8 scan end (exit code: $?) ---"
+          echo "Executing: ${cmd[*]}"
+          # Run the command, tee both stdout and stderr into the log file
+          "${cmd[@]}" 2>&1 | tee x8-debug-results/x8.log
+          exit_code=${PIPESTATUS[0]}
+          echo "--- x8 scan end (exit code: $exit_code) ---"
         continue-on-error: true
 
       - name: Upload x8 Results Log
