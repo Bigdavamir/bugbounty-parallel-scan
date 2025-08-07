@@ -1,104 +1,25 @@
-name: "X8 Debug Workflow"
+name: Docker Test for x8
 
 on:
   workflow_dispatch:
-    inputs:
-      domain:
-        description: 'Target URL (e.g., https://bigdav.ir/test.php)'
-        required: true
-        type: string
-        default: 'https://bigdav.ir/test.php'
-      parameter:
-        description: 'Parameter to test (e.g., category)'
-        required: true
-        type: string
-        default: 'category'
-      headers:
-        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
-        required: false
-        type: string
-        default: ''
 
 jobs:
-  debug-x8-single:
+  docker-x8-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install x8 (cargo build)
+      - name: Build Docker image using Dockerfile.test
         run: |
-          set -euxo pipefail
-          # Install Rust if missing
-          if ! command -v cargo >/dev/null 2>&1; then
-            curl https://sh.rustup.rs -sSf | sh -s -- -y
-            source "$HOME/.cargo/env"
-          else
-            source "$HOME/.cargo/env"
-          fi
-          # Install or update x8
-          cargo install --force x8
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          # Verify installation
-          which x8
-          x8 --version
+          docker build -f Dockerfile.test -t x8-test:latest .
 
-      - name: Debug Curl Raw Response
+      - name: Run Docker container and test x8
         run: |
-          set -euxo pipefail
-          echo "Debugging raw curl response for: ${{ github.event.inputs.domain }}"
-          echo "Testing payload: TESTPAYLOAD"
-          TARGET_URL="${{ github.event.inputs.domain }}?${{ github.event.inputs.parameter }}=TESTPAYLOAD"
-          HEADERS="${{ github.event.inputs.headers }}"
-          echo "Target URL: $TARGET_URL"
-          echo "Headers: '$HEADERS'"
-          if [ -n "$HEADERS" ]; then
-            RAW_RESPONSE=$(curl -k -s -X GET "$TARGET_URL" -H "$HEADERS")
-          else
-            RAW_RESPONSE=$(curl -k -s -X GET "$TARGET_URL")
-          fi
-          echo "Raw Curl Response:"
-          echo "$RAW_RESPONSE"
-          if echo "$RAW_RESPONSE" | grep -q "TESTPAYLOAD"; then
-            echo "SUCCESS: 'TESTPAYLOAD' found."
-          else
-            echo "WARNING: 'TESTPAYLOAD' NOT found."
-          fi
-
-      - name: Prepare input files for x8
-        run: |
-          set -euxo pipefail
-          echo "${{ github.event.inputs.domain }}" > target_url.txt
-          echo "${{ github.event.inputs.parameter }}" > param_wordlist.txt
-          mkdir -p x8-debug-results
-
-      - name: Run x8 scanner (verbose & output to file)
-        id: x8-scan
-        run: |
-          set -euxo pipefail
-          # Ensure x8 in PATH and correct locale
-          export PATH="$HOME/.cargo/bin:$PATH"
-          export LANG=en_US.UTF-8
-          export LC_ALL=en_US.UTF-8
-
-          echo "--- x8 scan start ---"
-          # Build x8 command as array to avoid eval issues
-          cmd=(x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v -X GET)
-          # If you also want POST testing, use: cmd+=( -X GET POST )
-          if [ -n "${{ github.event.inputs.headers }}" ]; then
-            cmd+=( -H "${{ github.event.inputs.headers }}" )
-          fi
-          echo "Executing: ${cmd[*]}"
-          # Run the command; tee both stdout and stderr into the log file
-          "${cmd[@]}" 2>&1 | tee x8-debug-results/x8.log
-          exit_code=${PIPESTATUS[0]}
-          echo "--- x8 scan end (exit code: $exit_code) ---"
-        continue-on-error: true
-
-      - name: Upload x8 Results Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: x8-debug-log
-          path: x8-debug-results/x8.log
-          retention-days: 7
+          docker run --rm -v "${{ github.workspace }}":/workspace x8-test:latest bash -c "\
+            cd /workspace && \
+            echo 'Testing curl reflection...' && \
+            curl -s -G --data-urlencode 'category=TESTPAYLOAD' 'https://bigdav.ir/test.php' | grep TESTPAYLOAD && echo 'Curl test OK' && \
+            echo 'Testing x8 execution...' && \
+            x8 -u 'https://bigdav.ir/test.php?category=TESTPAYLOAD' -w combined-results/unfurl-params.txt -X GET POST -v 2>&1 | tee x8.log && \
+            grep 'reflects:' x8.log"
