@@ -1,149 +1,116 @@
-name: X8 Single URL Test
+name: "X8 Debug Workflow"
 
 on:
   workflow_dispatch:
     inputs:
-      target_url:
-        description: 'The single URL to test with x8'
+      domain:
+        description: 'Target domain (e.g., example.com)'
         required: true
-        default: 'https://bigdav.ir/test.php'
         type: string
-      test_param:
-        description: 'The parameter name to test for reflection'
+        default: 'https://bigdav.ir/test.php' # Default for easier testing
+      parameter:
+        description: 'Parameter to test (e.g., category)'
         required: true
-        default: 'category'
         type: string
-      test_payload:
-        description: 'The test payload to use for curl reflection check'
-        required: true
-        default: 'TESTPAYLOAD'
-        type: string
+        default: 'category' # Default for easier testing
       headers:
-        description: 'Optional custom headers (e.g., "Cookie: value; Authorization: Bearer token")'
+        description: 'Custom headers (optional, e.g., "Cookie: session=abc123")'
         required: false
         type: string
+        default: ''
 
 jobs:
-  run-x8-single-test:
+  debug-x8-single:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Install x8 (Hybrid, Fix PATH)
+      - name: Install x8 (direct download)
         run: |
-          set -ex
-          echo "Attempting direct download of x8..."
-          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8 && \
-          chmod +x x8 && \
-          sudo mv x8 /usr/local/bin/ && \
-          command -v x8 && \
-          echo "x8 installed via direct download" && \
-          exit 0
-          
-          echo "Direct download failed, trying cargo..."
-          curl https://sh.rustup.rs -sSf | sh -s -- -y
-          source "$HOME/.cargo/env"
-          cargo install x8 && \
-          echo "x8 installed via cargo"
-          
-          echo "Fixing PATH for x8..."
-          sudo cp "$HOME/.cargo/bin/x8" /usr/local/bin/x8 || true # Copy even if it fails, fallback is fine
-          echo "/usr/local/bin" >> $GITHUB_PATH
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
-          echo "Updated PATH: $PATH"
+          echo "Installing x8..."
+          wget https://github.com/Sh1Yo/x8/releases/latest/download/x8-linux-x86_64 -O x8
+          chmod +x x8
+          sudo mv x8 /usr/local/bin
+          echo "x8 installed. Version:"
+          x8 --version || true # Display version, continue on error
 
-      - name: Debug x8 Binary/Path and Version
+      - name: Debug Curl Raw Response
         run: |
-          echo "Which x8:"; which x8 || echo "x8 not found in PATH"
-          echo "x8 version:"; x8 --version || echo "x8 command failed"
-          ls -al /usr/local/bin/x8 $HOME/.cargo/bin/x8 || true
-          echo "Current PATH: $PATH"
+          set -euxo pipefail
+          echo "Debugging raw curl response for input domain: ${{ github.event.inputs.domain }}"
+          echo "Testing with payload: TESTPAYLOAD"
 
-      - name: Prepare input files for x8
-        run: |
-          echo "${{ inputs.target_url }}" > target_url.txt
-          echo "${{ inputs.test_param }}" > param_wordlist.txt
-          echo "Target URL: $(cat target_url.txt)"
-          echo "Parameter Wordlist: $(cat param_wordlist.txt)"
+          # Use a simple curl command for debugging purposes
+          CURL_COMMAND="curl -k -s -X GET '${{ github.event.inputs.domain }}?${{ github.event.inputs.parameter }}=TESTPAYLOAD'"
 
-      - name: "[DEBUG] Check target URL's raw response in CI for reflection"
-        run: |
-          TARGET_URL="${{ inputs.target_url }}"
-          TEST_PARAM="${{ inputs.test_param }}"
-          TEST_PAYLOAD="${{ inputs.test_payload }}"
-          FULL_URL="${TARGET_URL}?${TEST_PARAM}=${TEST_PAYLOAD}"
-          
-          echo "Attempting to fetch raw response for: $FULL_URL"
-          echo "Using raw headers input: '${{ inputs.headers }}'" # Debugging headers input
-          
-          if [[ -n "${{ inputs.headers }}" ]]; then
-            curl -k -s -L -D /dev/stderr -H "${{ inputs.headers }}" "${FULL_URL}" > curl_raw_output.txt || true
-          else
-            curl -k -s -L -D /dev/stderr "${FULL_URL}" > curl_raw_output.txt || true
+          # Add headers if provided
+          if [ -n "${{ github.event.inputs.headers }}" ]; then
+            CURL_COMMAND="${CURL_COMMAND} -H \"${{ github.event.inputs.headers }}""
           fi
-          
-          echo "--- Raw response body (first 1000 chars) from curl: ---"
-          head -c 1000 curl_raw_output.txt || echo "No response body or less than 1000 chars"
-          echo ""
-          echo "--- Checking for '${{ inputs.test_payload }}' reflection in curl output ---"
-          if grep -i "${{ inputs.test_payload }}" curl_raw_output.txt; then
-            echo "SUCCESS: '${{ inputs.test_payload }}' found in raw response."
+
+          echo "Executing curl command: $CURL_COMMAND"
+          RAW_RESPONSE=$(eval "$CURL_COMMAND")
+          echo "Raw Curl Response:"
+          echo "$RAW_RESPONSE"
+
+          if echo "$RAW_RESPONSE" | grep -q "TESTPAYLOAD"; then
+            echo "SUCCESS: 'TESTPAYLOAD' found in raw response."
           else
-            echo "WARNING: '${{ inputs.test_payload }}' NOT found in raw response."
+            echo "WARNING: 'TESTPAYLOAD' NOT found in raw response. This might indicate no reflection."
           fi
-          echo "--- End of raw response check ---"
+          echo "----------------------------------------"
 
       - name: Run x8 with verbose output and stderr capture
         run: |
-          set -euxo pipefail # Add this line
-          mkdir -p x8-results-${{ matrix.chunk }}
+          # Enable strict error checking and print commands as they are executed
+          set -euxo pipefail
+
+          # Set locale environment variables to ensure consistent output
           export LANG=en_US.UTF-8
           export LC_ALL=en_US.UTF-8
-          
-          echo "https://bigdav.ir/test.php" > target_url.txt
-          echo "category" > param_wordlist.txt
 
+          # Create input files for x8
+          echo "${{ github.event.inputs.domain }}" > target_url.txt
+          echo "${{ github.event.inputs.parameter }}" > param_wordlist.txt
+
+          # Define a fixed output directory for this debug job
+          DEBUG_OUTPUT_DIR="x8-debug-results"
+          mkdir -p "$DEBUG_OUTPUT_DIR"
+
+          echo "Running x8 with verbose output on ${{ github.event.inputs.domain }}..."
+          echo "Parameter wordlist: ${{ github.event.inputs.parameter }}"
+
+          # Check if input files exist and are not empty before running x8
           if [[ -s "target_url.txt" ]] && [[ -s "param_wordlist.txt" ]]; then
-            echo "Running x8 with verbose output..."
-            x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v 2>&1 | tee x8-results-${{ matrix.chunk }}/x8-verbose.log || true
-            
+            # Execute x8, redirecting both stdout and stderr to tee and then to a log file.
+            # '|| true' ensures the step doesn't fail immediately if x8 exits with a non-zero code.
+            x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v 2>&1 | tee "${DEBUG_OUTPUT_DIR}/x8-verbose.log" || true
+
+            # Capture and display x8's exit code
             X8_EXIT_CODE=$?
             echo "x8 exited with code: $X8_EXIT_CODE"
-            
-            echo "Raw x8 Scan Output (from tee file):"
-            cat x8-results-${{ matrix.chunk }}/x8-verbose.log || echo "x8-verbose.log not found or empty."
 
-            if grep -q "reflections: category" x8-results-${{ matrix.chunk }}/x8-verbose.log; then
-              echo "SUCCESS: 'reflections: category' found in x8 output."
+            echo "--- Raw x8 Scan Output (from log file): ---"
+            cat "${DEBUG_OUTPUT_DIR}/x8-verbose.log" || echo "x8-verbose.log not found or empty."
+            echo "--------------------------------------------"
+
+            # Check for the reflection string in the x8 output log
+            if grep -q "reflections: ${{ github.event.inputs.parameter }}" "${DEBUG_OUTPUT_DIR}/x8-verbose.log"; then
+              echo "SUCCESS: 'reflections: ${{ github.event.inputs.parameter }}' found in x8 output."
             else
-              echo "WARNING: 'reflections: category' NOT found in x8 output."
+              echo "WARNING: 'reflections: ${{ github.event.inputs.parameter }}' NOT found in x8 output."
+              echo "This indicates x8 is still not reporting the reflection in CI."
             fi
           else
             echo "ERROR: Input files target_url.txt or param_wordlist.txt are empty or not found."
-            touch x8-results-${{ matrix.chunk }}/x8-verbose.log
+            # Create an empty log file to avoid subsequent errors
+            touch "${DEBUG_OUTPUT_DIR}/x8-verbose.log"
           fi
-        env:
-          LANG: en_US.UTF-8
-          LC_ALL: en_US.UTF-8
 
-
-
-      - name: Display raw x8 output
-        run: |
-          echo "====== Raw x8 Scan Output ======"
-          cat x8_output.txt || echo "x8_output.txt not found or empty."
-          echo "================================"
-
-      - name: Extract reflected/injectable params from x8 output
-        run: |
-          echo "====== Filtered x8 Reflected/Injectable Parameters ======"
-          grep -Ei 'reflects|change reflect' x8_output.txt > x8_reflected_params.txt || true
-          if [[ -s "x8_reflected_params.txt" ]]; then
-            cat x8_reflected_params.txt
-            echo "Total reflected/injectable lines found: $(wc -l < x8_reflected_params.txt)"
-          else
-            echo "No reflected or injectable parameters found in x8 output."
-          fi
-          echo "========================================================"
+      - name: Start tmate session for live debugging (Optional)
+        # Uncomment this step if you want to connect via SSH to the runner for live debugging
+        # You will see an SSH command in the logs if this step runs successfully
+        # uses: mxschmitt/action-tmate@v3
+        # with:
+        #   ssh: true
