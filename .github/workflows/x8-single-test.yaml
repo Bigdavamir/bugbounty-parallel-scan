@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       domain:
-        description: 'Target domain (e.g., https://bigdav.ir/test.php)'
+        description: 'Target URL (e.g., https://bigdav.ir/test.php)'
         required: true
         type: string
         default: 'https://bigdav.ir/test.php'
@@ -33,55 +33,38 @@ jobs:
           if ! command -v cargo >/dev/null 2>&1; then
             echo "Rust not found, installing Rust via rustup..."
             curl https://sh.rustup.rs -sSf | sh -s -- -y
-            echo "Sourcing cargo environment..."
             source "$HOME/.cargo/env"
           else
-            echo "Rust already installed."
-            source "$HOME/.cargo/env" # Ensure cargo env is sourced for current shell
+            source "$HOME/.cargo/env"
           fi
-          
           echo "Installing/Updating x8 via cargo..."
           cargo install --force x8
-          
-          echo "Adding cargo bin to GITHUB_PATH..."
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          
           echo "Verifying x8 installation..."
-          which x8 || { echo "Error: x8 command not found after installation!"; exit 1; }
-          x8 --version || { echo "Error: Failed to get x8 version!"; exit 1; }
-          echo "x8 installation complete."
+          which x8
+          x8 --version
 
-      - name: Debug Curl Raw Response (Fixed)
+      - name: Debug Curl Raw Response
         run: |
           set -euxo pipefail
-          echo "Debugging raw curl response for input domain: ${{ github.event.inputs.domain }}"
-          echo "Testing with payload: TESTPAYLOAD"
-
+          echo "Debugging raw curl response for: ${{ github.event.inputs.domain }}"
+          echo "Testing payload: TESTPAYLOAD"
           TARGET_URL="${{ github.event.inputs.domain }}?${{ github.event.inputs.parameter }}=TESTPAYLOAD"
           HEADERS="${{ github.event.inputs.headers }}"
-
           echo "Target URL: $TARGET_URL"
-          echo "Headers provided: '$HEADERS'"
-
-          RAW_RESPONSE=""
-          # Using if-else for conditional headers
+          echo "Headers: '$HEADERS'"
           if [ -n "$HEADERS" ]; then
-            echo "Executing curl command with headers..."
             RAW_RESPONSE=$(curl -k -s -X GET "$TARGET_URL" -H "$HEADERS")
           else
-            echo "Executing curl command without headers..."
             RAW_RESPONSE=$(curl -k -s -X GET "$TARGET_URL")
           fi
-
           echo "Raw Curl Response:"
           echo "$RAW_RESPONSE"
-
           if echo "$RAW_RESPONSE" | grep -q "TESTPAYLOAD"; then
-            echo "SUCCESS: 'TESTPAYLOAD' found in raw response."
+            echo "SUCCESS: 'TESTPAYLOAD' found."
           else
-            echo "WARNING: 'TESTPAYLOAD' NOT found in raw response. This might indicate no reflection."
+            echo "WARNING: 'TESTPAYLOAD' NOT found."
           fi
-          echo "----------------------------------------"
 
       - name: Prepare input files for x8
         run: |
@@ -89,34 +72,29 @@ jobs:
           echo "${{ github.event.inputs.domain }}" > target_url.txt
           echo "${{ github.event.inputs.parameter }}" > param_wordlist.txt
           mkdir -p x8-debug-results
-          echo "Input files created: target_url.txt, param_wordlist.txt"
 
       - name: Run x8 scanner (verbose & output to file)
         id: x8-scan
         run: |
           set -euxo pipefail
-          # Ensure x8 is in PATH for this step
           export PATH="$HOME/.cargo/bin:$PATH"
           export LANG=en_US.UTF-8
           export LC_ALL=en_US.UTF-8
 
           echo "--- x8 scan start ---"
           X8_COMMAND="x8 -u "$(cat target_url.txt)" -w param_wordlist.txt -v"
-          
-          # Add headers if provided
           if [ -n "${{ github.event.inputs.headers }}" ]; then
             X8_COMMAND="$X8_COMMAND -H \"${{ github.event.inputs.headers }}""
           fi
-
-          echo "Executing command: $X8_COMMAND"
+          echo "Executing: $X8_COMMAND"
           eval $X8_COMMAND 2>&1 | tee x8-debug-results/x8.log
           echo "--- x8 scan end (exit code: $?) ---"
-        continue-on-error: true # Allow step to continue even if x8 exits with non-zero code
+        continue-on-error: true
 
       - name: Upload x8 Results Log
-        if: always() # Always run this step, even if previous steps failed
-        uses: actions/upload-artifact@v3
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: x8-debug-log
           path: x8-debug-results/x8.log
-          retention-days: 7 # Optional: how long to keep the artifact
+          retention-days: 7
