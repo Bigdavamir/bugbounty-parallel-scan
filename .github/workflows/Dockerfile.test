@@ -1,16 +1,17 @@
 # --------------------------
-# Dockerfile.xss-tools (for Ubuntu 22.04, fully stable)
+# Dockerfile.test (for Ubuntu 22.04, fully stable)
 # --------------------------
 
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# پتچ dependencies برای Rust و شبکه
+# Update and install dependencies for Rust and networking
 RUN apt-get update && \
     apt-get install -y \
         wget curl ca-certificates unzip git bash golang-go cargo \
         pkg-config libssl-dev build-essential \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------
@@ -30,15 +31,21 @@ RUN git clone --depth=1 https://github.com/Sh1Yo/x8.git /tmp/x8 && \
     cargo build --release && \
     cp target/release/x8 /usr/local/bin/x8 && \
     chmod +x /usr/local/bin/x8 && \
-    cd / && rm -rf /tmp/x8
+    cd / && rm -rf /tmp/x8 ~/.cargo
 
 # ---------
 # 3. kxss - official way via Go
 # ---------
 RUN go install github.com/Emoe/kxss@latest && \
     cp /root/go/bin/kxss /usr/local/bin/kxss && \
-    chmod +x /usr/local/bin/kxss
+    chmod +x /usr/local/bin/kxss && \
+    rm -rf /root/go
 
-# Sets
+# Verify tools are working
+RUN httpx -version && x8 --help && kxss -h
+
+# Set working directory
 WORKDIR /workspace
-ENTRYPOINT ["/bin/bash"]
+
+# Use CMD instead of ENTRYPOINT for better compatibility
+CMD ["/bin/bash"]
